@@ -354,13 +354,10 @@ function calMeta(id){return CAL_META[id]||{label:(id||'').split('@')[0],sub:'',c
 let accessToken = '';
 let currentDay = 0;
 let viaggi = [];
-let automezzi = JSON.parse(localStorage.getItem('locom_automezzi') || 'null') || [
-  {id:'m1',targa:'GK912',nome:'Furgone GK912',tipo:'furgone',disp:true},
-  {id:'m2',targa:'GZ926',nome:'Porter GZ926',tipo:'porter',disp:true},
-  {id:'m3',targa:'GZ997',nome:'Porter GZ997',tipo:'porter',disp:true},
-  {id:'m4',targa:'EH247',nome:'Autocarro EH247',tipo:'autocarro',disp:true},
-  {id:'m5',targa:'GT947ZC',nome:'Mezzo GT947ZC',tipo:'furgone',disp:true},
-];
+// Flotta mezzi: parte VUOTA (le targhe le aggiungi tu dalla scheda Automezzi).
+// Reset una-tantum per togliere i mezzi di esempio già salvati sui dispositivi.
+if(localStorage.getItem('locom_automezzi_v')!=='2'){ localStorage.removeItem('locom_automezzi'); localStorage.setItem('locom_automezzi_v','2'); }
+let automezzi = JSON.parse(localStorage.getItem('locom_automezzi') || '[]');
 function saveAutomezzi(){localStorage.setItem('locom_automezzi',JSON.stringify(automezzi));}
 
 // ── GOOGLE AUTH ──
@@ -669,15 +666,21 @@ function renderOttimiz(ottimiz){
 }
 
 function renderAutomezzi(){
+  if(!automezzi.length){
+    document.getElementById('automezzi-list').innerHTML='<div class="empty"><i class="ti ti-truck"></i> Nessun mezzo. Aggiungi le targhe con il pulsante “Aggiungi mezzo”.</div>';
+    return;
+  }
   document.getElementById('automezzi-list').innerHTML=automezzi.map(m=>`
     <div class="mezzo-row">
       <div><div class="mezzo-targa"><i class="ti ti-truck" style="font-size:14px;margin-right:6px"></i>${m.targa}</div><div class="mezzo-info">${m.nome} · ${m.tipo}</div></div>
       <div style="display:flex;align-items:center;gap:8px">
         <span class="pill ${m.disp?'pill-green':'pill-orange'}">${m.disp?'disponibile':'in uso'}</span>
         <button class="btn" style="padding:4px 8px;font-size:11px" onclick="toggleMezzo('${m.id}')">${m.disp?'<i class="ti ti-lock"></i> Occupa':'<i class="ti ti-lock-open"></i> Libera'}</button>
+        <button class="btn" style="padding:4px 8px;font-size:11px;color:var(--red)" onclick="rimuoviMezzo('${m.id}')"><i class="ti ti-trash"></i></button>
       </div>
     </div>`).join('');
 }
+function rimuoviMezzo(id){const m=automezzi.find(x=>x.id===id);if(!m)return;if(!confirm('Rimuovere il mezzo '+m.targa+'?'))return;automezzi=automezzi.filter(x=>x.id!==id);saveAutomezzi();renderAutomezzi();}
 function toggleMezzo(id){const m=automezzi.find(x=>x.id===id);if(!m)return;m.disp=!m.disp;saveAutomezzi();renderAutomezzi();}
 function addMezzo(){
   const targa=prompt('Targa:');if(!targa)return;

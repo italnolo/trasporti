@@ -157,7 +157,12 @@ body{font-family:var(--font);background:var(--bg);color:var(--text-primary);min-
 .login-cals div{padding:3px 0;display:flex;align-items:center;gap:6px}
 
 @media(max-width:900px){
-  .sidebar{display:none}
+  .layout{flex-direction:column;height:auto}
+  .sidebar{width:100%;min-width:0;flex-direction:row;overflow-x:auto;overflow-y:hidden;gap:2px;padding:6px 8px;border-right:none;border-bottom:1px solid var(--border);position:sticky;top:0;z-index:30;-webkit-overflow-scrolling:touch}
+  .nav-section{display:none}
+  .nav-item{border-left:none;border-bottom:3px solid transparent;white-space:nowrap;flex:0 0 auto;padding:8px 12px}
+  .nav-item.active{border-left:none;border-bottom-color:var(--accent)}
+  .main{flex:none;overflow-y:visible;padding:16px}
   .kpi-row{grid-template-columns:repeat(2,1fr)}
   .sedi-grid{grid-template-columns:repeat(2,1fr)}
   .form-grid{grid-template-columns:1fr}
@@ -446,6 +451,17 @@ function buildViaggio(ev, calId){
   const desc=ev.description||'';
   const targaM=desc.match(/targa[:\s]+([A-Z0-9]{4,10})/i)||(ev.summary||'').match(/\b([A-Z]{2}\d{3,}[A-Z]{0,2})\b/);
   const autistaM=desc.match(/(?:autista|conducente)[:\s]+([A-Za-zàèìòù ]+)/i);
+  // Finestra multi-giorno (note flessibili): evento tutto-il-giorno che dura più di un giorno.
+  const sDate=ev.start?.date||(ev.start?.dateTime?ev.start.dateTime.split('T')[0]:'');
+  const eDate=ev.end?.date||(ev.end?.dateTime?ev.end.dateTime.split('T')[0]:'');
+  let finestra=false, giorniFinestra=1;
+  if(isAllDay && sDate && eDate){
+    const giorni=Math.round((Date.parse(eDate)-Date.parse(sDate))/86400000);
+    giorniFinestra=Math.max(1,giorni);
+    finestra=giorni>1;
+  }
+  // Scadenza: prima data gg/mm(/aa) trovata nel titolo o nelle note.
+  const scad=parseScadenza((ev.summary||'')+' '+desc);
   return {
     id:ev.id||('ev-'+Math.random()),
     summary:ev.summary||'',
@@ -455,7 +471,17 @@ function buildViaggio(ev, calId){
     targa:targaM?.[1]||'',autista:autistaM?.[1]?.trim()||'',
     note:desc,status:targaM?.[1]?'autorizzato':'pending',
     calId:calId||'',start:ev.start?.dateTime||ev.start?.date||'',
+    finestra,giorniFinestra,startDate:sDate,endDate:eDate,scadenza:scad,
   };
+}
+// Estrae una data gg/mm o gg/mm/aa da un testo e la ritorna come ISO (YYYY-MM-DD), o ''.
+function parseScadenza(txt){
+  const m=(txt||'').match(/\b(\d{1,2})[\/\-.](\d{1,2})(?:[\/\-.](\d{2,4}))?\b/);
+  if(!m) return '';
+  const g=+m[1], me=+m[2]; let a=m[3]?+m[3]:new Date().getFullYear();
+  if(a<100) a+=2000;
+  if(g<1||g>31||me<1||me>12) return '';
+  return `${a}-${String(me).padStart(2,'0')}-${String(g).padStart(2,'0')}`;
 }
 
 function detectOttimizzazioni(lista){
@@ -815,7 +841,8 @@ function fmtMin(m){const h=Math.floor(m/60),mm=m%60;return h?`${h}h ${mm}′`:`$
 
 function corriereItems(){
   return viaggi.filter(v=>v.calId==='corrierelocom@gmail.com' && v.from!=='??' && v.to!=='??' && v.from!==v.to)
-    .map(v=>({id:v.id, from:v.from, to:v.to, label:v.merce||v.summary||'(materiale)'}));
+    .map(v=>({id:v.id, from:v.from, to:v.to, label:v.merce||v.summary||'(materiale)',
+              finestra:!!v.finestra, giorniFinestra:v.giorniFinestra||1, endDate:v.endDate||'', scadenza:v.scadenza||''}));
 }
 
 // Heuristica: parti dalla base (Pisa), carica subito ciò che parte dalla base,
@@ -863,6 +890,23 @@ function setColloStato(id,s){ const k=corrDayKey(0); (corriereStato[k]=corriereS
 function setColloPickup(id,s){ const k=corrDayKey(0); corrierePickup[k]=corrierePickup[k]||{}; if(s) corrierePickup[k][id]=s; else delete corrierePickup[k][id]; renderCorriere(); }
 function setCorriereBase(v){ corriereBase=v; renderCorriere(); }
 
+// Spostamenti flessibili: inclusi nel giro solo se Franco lo decide, per singolo giorno.
+let corriereFlex={};
+function flexIncluso(id){ const d=corriereFlex[corrDayKey(0)]; return !!(d&&d[id]); }
+function toggleFlex(id){ const k=corrDayKey(0); corriereFlex[k]=corriereFlex[k]||{}; if(corriereFlex[k][id]) delete corriereFlex[k][id]; else corriereFlex[k][id]=true; renderCorriere(); }
+// Scadenza di un flessibile: data nel testo, oppure ultimo giorno della finestra.
+function scadenzaFlex(it){
+  if(it.scadenza) return it.scadenza;
+  if(it.endDate){ const d=new Date(Date.parse(it.endDate)-86400000); return isoDate(d); } // endDate è esclusiva
+  return '';
+}
+function giorniAllaScadenza(iso){
+  if(!iso) return null;
+  const oggi=corrDayKey(0);
+  return Math.round((Date.parse(iso)-Date.parse(oggi))/86400000);
+}
+function fmtData(iso){ if(!iso) return ''; const [y,m,d]=iso.split('-'); return `${d}/${m}`; }
+
 function renderCorriere(){
   const host=document.getElementById('view-corriere');
   const bsel=host.querySelector('#corr-base');
@@ -872,16 +916,20 @@ function renderCorriere(){
 
   const carried=(corriereCarry[corrDayKey(0)]||[]);             // arrivano a bordo da ieri
   const carriedIds=new Set(carried.map(x=>x.id));
-  const raw=corriereItems().filter(it=>!carriedIds.has(it.id)); // colli odierni con rotta valida
+  const rawAll=corriereItems().filter(it=>!carriedIds.has(it.id)); // colli odierni con rotta valida
+  const rawFissi=rawAll.filter(it=>!it.finestra);                  // viaggi fissi del giorno
+  const rawFlex=rawAll.filter(it=>it.finestra);                    // spostamenti flessibili (finestra)
+  const flexInGiro=rawFlex.filter(it=>flexIncluso(it.id));         // flessibili scelti per oggi
+  const oggiItems=rawFissi.concat(flexInGiro);
   const senzaRotta=viaggi.filter(v=>v.calId==='corrierelocom@gmail.com' && (v.from==='??'||v.to==='??'||v.from===v.to));
 
-  if(!raw.length && !senzaRotta.length && !carried.length){
+  if(!rawAll.length && !senzaRotta.length && !carried.length){
     body.innerHTML='<div class="empty"><i class="ti ti-truck"></i> Nessun viaggio del Corriere per questo giorno. Carica una giornata dalla vista <strong>Oggi</strong>.</div>';
     return;
   }
 
   // colli odierni: stato e sede di carico effettiva
-  const colli=raw.map(it=>{
+  const colli=oggiItems.map(it=>{
     const stato=statoCollo(it.id);
     const from=pickupCollo(it.id)||it.from;
     return {id:it.id, from, fromOrig:it.from, to:it.to, label:it.label, stato, deliver:(stato==='giro'), carried:false};
@@ -954,6 +1002,32 @@ function renderCorriere(){
     </div>`;
   });
   html+='</div>';
+
+  // ── Spostamenti flessibili (note multi-giorno) ──
+  if(rawFlex.length){
+    html+='<div class="card" style="margin-top:12px"><div class="card-header"><span class="card-title">Spostamenti flessibili</span><span style="font-size:11px;color:var(--text-muted)">da fare entro la finestra · non urgenti</span></div>';
+    rawFlex.forEach(it=>{
+      const incluso=flexIncluso(it.id);
+      const iso=scadenzaFlex(it);
+      const gg=giorniAllaScadenza(iso);
+      let scadHtml='';
+      if(iso){
+        const urgente=(gg!==null&&gg<=0), vicino=(gg!==null&&gg>0&&gg<=1);
+        const col=urgente?'var(--red)':vicino?'var(--orange)':'var(--text-muted)';
+        const txt=gg===null?`entro ${fmtData(iso)}`:gg<0?`scaduto (${fmtData(iso)})`:gg===0?`scade oggi (${fmtData(iso)})`:`entro ${fmtData(iso)} (${gg} gg)`;
+        scadHtml=`<span class="tag" style="background:transparent;color:${col};border:1px solid ${col}"><i class="ti ti-clock"></i> ${txt}</span>`;
+      }
+      html+=`<div class="viaggio" style="cursor:default">
+        <div class="v-top" style="flex-wrap:wrap;gap:8px">
+          <span class="v-route" style="flex:1 1 200px">${SEDI[it.from]?.label||it.from} <i class="ti ti-arrow-right" style="font-size:12px;color:#c8cdd6"></i> ${SEDI[it.to]?.label||it.to} — ${it.label}</span>
+          ${scadHtml}
+          <button class="btn ${incluso?'':'primary'}" style="padding:3px 10px;font-size:11px" onclick="toggleFlex('${it.id}')">${incluso?'<i class="ti ti-x"></i> Togli dal giro':'<i class="ti ti-plus"></i> Aggiungi al giro di oggi'}</button>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:6px"><i class="ti ti-calendar-time"></i> finestra di ${it.giorniFinestra} giorni · ${incluso?'inserito nel giro di oggi':'in attesa, quando conviene'}</div>
+      </div>`;
+    });
+    html+='</div>';
+  }
 
   if(senzaRotta.length){
     html+='<div class="card" style="margin-top:12px"><div class="card-header"><span class="card-title">Richieste del Corriere senza sedi chiare</span><span style="font-size:11px;color:var(--text-muted)">non ancora nel giro</span></div>';

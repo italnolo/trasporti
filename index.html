@@ -286,9 +286,20 @@ body{font-family:var(--font);background:var(--bg);color:var(--text-primary);min-
         <div class="form-group"><label>Partenza</label><select id="f-from"></select></div>
         <div class="form-group"><label>Arrivo</label><select id="f-to"></select></div>
       </div>
-      <div class="form-grid">
+      <div class="form-group">
+        <label>Tipo di viaggio</label>
+        <select id="f-tipo" onchange="tipoViaggioChange()">
+          <option value="giorno">In giornata</option>
+          <option value="finestra">Più giorni (finestra da…a)</option>
+        </select>
+      </div>
+      <div class="form-grid" id="row-giorno">
         <div class="form-group"><label>Data</label><input type="date" id="f-date"></div>
         <div class="form-group"><label>Ora (opzionale)</label><input type="time" id="f-time"></div>
+      </div>
+      <div class="form-grid" id="row-finestra" style="display:none">
+        <div class="form-group"><label>Dal giorno</label><input type="date" id="f-date-da"></div>
+        <div class="form-group"><label>Al giorno (compreso)</label><input type="date" id="f-date-a"></div>
       </div>
       <div class="form-group"><label>Merce / materiale</label><input type="text" id="f-merce" placeholder="es. Generatore 45KW, Idropulitrice..."></div>
       <div class="form-grid">
@@ -614,6 +625,7 @@ function renderViaggioCard(v,ottimiz){
       <span class="v-time">${timeLabel}</span>
       ${routeHtml}
       ${tagHtml}
+      ${v.finestra?`<span class="tag" style="background:var(--surface-2);color:var(--text-secondary)"><i class="ti ti-calendar-time" style="font-size:10px"></i> finestra ${v.giorniFinestra}gg</span>`:''}
     </div>
     ${hasRoute?`<div class="v-merce">${v.merce||v.summary}</div>`:''}
     ${abbinato&&v.status!=='autorizzato'?`<div style="font-size:11px;color:var(--green);margin-top:4px;padding-left:62px"><i class="ti ti-bulb"></i> ${abbinato.msg}</div>`:''}
@@ -722,7 +734,17 @@ function populateNuovoForm(){
   document.getElementById('f-to').innerHTML='<option value="">Seleziona sede</option>'+opts;
   const mOpts=automezzi.map(m=>`<option value="${m.targa}">${m.targa} — ${m.nome}${!m.disp?' (occupato)':''}</option>`).join('');
   document.getElementById('f-mezzo').innerHTML='<option value="">Seleziona mezzo</option>'+mOpts;
-  document.getElementById('f-date').value=isoDate(getTargetDate());
+  const oggi=isoDate(getTargetDate());
+  document.getElementById('f-date').value=oggi;
+  document.getElementById('f-date-da').value=oggi;
+  document.getElementById('f-date-a').value=oggi;
+  document.getElementById('f-tipo').value='giorno';
+  tipoViaggioChange();
+}
+function tipoViaggioChange(){
+  const t=document.getElementById('f-tipo').value;
+  document.getElementById('row-giorno').style.display = t==='giorno'?'':'none';
+  document.getElementById('row-finestra').style.display = t==='finestra'?'':'none';
 }
 
 // ── Scrittura sul SOLO calendario Corriere ────────────────────────────────
@@ -749,17 +771,26 @@ async function autorizzaViaggio(){
   const mezzo=document.getElementById('f-mezzo').value;
   const autista=document.getElementById('f-autista').value.trim();
   const note=document.getElementById('f-note').value.trim();
-  const time=document.getElementById('f-time').value;
-  const dateStr=document.getElementById('f-date').value||isoDate(getTargetDate());
   if(!from||!to||!merce){alert('Compila partenza, arrivo e merce.');return;}
 
+  const tipo=document.getElementById('f-tipo').value;
   let start,end;
-  if(time){
-    const [hh,mm]=time.split(':'); const eh=String(Math.min(parseInt(hh,10)+1,23)).padStart(2,'0');
-    start={dateTime:`${dateStr}T${time}:00`,timeZone:'Europe/Rome'};
-    end={dateTime:`${dateStr}T${eh}:${mm}:00`,timeZone:'Europe/Rome'};
+  if(tipo==='finestra'){
+    const da=document.getElementById('f-date-da').value;
+    const a=document.getElementById('f-date-a').value;
+    if(!da||!a){alert('Indica il giorno iniziale e finale della finestra.');return;}
+    if(a<da){alert('Il giorno finale è prima di quello iniziale.');return;}
+    start={date:da}; end={date:nextDateStr(a)};   // end esclusiva: comprende il giorno "a"
   }else{
-    start={date:dateStr}; end={date:nextDateStr(dateStr)};
+    const dateStr=document.getElementById('f-date').value||isoDate(getTargetDate());
+    const time=document.getElementById('f-time').value;
+    if(time){
+      const [hh,mm]=time.split(':'); const eh=String(Math.min(parseInt(hh,10)+1,23)).padStart(2,'0');
+      start={dateTime:`${dateStr}T${time}:00`,timeZone:'Europe/Rome'};
+      end={dateTime:`${dateStr}T${eh}:${mm}:00`,timeZone:'Europe/Rome'};
+    }else{
+      start={date:dateStr}; end={date:nextDateStr(dateStr)};
+    }
   }
   const desc=[]; if(mezzo)desc.push('Mezzo: '+mezzo); if(autista)desc.push('Autista: '+autista); if(note)desc.push(note);
   const body={summary:`${from}-${to} ${merce}`,description:desc.join('\n'),start,end};

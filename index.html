@@ -762,6 +762,31 @@ async function apiDeleteEvent(calId,eventId){
   if(!(r.ok||r.status===410)) throw new Error('HTTP '+r.status);
   return true;
 }
+async function apiPatchEvent(calId,eventId,body){
+  const r=await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events/${encodeURIComponent(eventId)}`,{
+    method:'PATCH',headers:{'Authorization':'Bearer '+accessToken,'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!r.ok) throw new Error('HTTP '+r.status+' — '+(await r.text()).slice(0,200));
+  return r.json();
+}
+// Sposta un viaggio del Corriere a un'altra data (lo riscrive sul calendario).
+async function spostaCollo(eventId,eid){
+  const nd=document.getElementById('mvd-'+eid)?.value;
+  if(!nd){alert('Scegli la nuova data.');return;}
+  if(!accessToken){alert('Accedi prima con Google.');return;}
+  const v=viaggi.find(x=>x.id===eventId);
+  let start,end;
+  if(v && !v.allDay && v.time){
+    const [hh,mm]=v.time.split(':'); const eh=String(Math.min(parseInt(hh,10)+1,23)).padStart(2,'0');
+    start={dateTime:`${nd}T${v.time}:00`,timeZone:'Europe/Rome'};
+    end={dateTime:`${nd}T${eh}:${mm}:00`,timeZone:'Europe/Rome'};
+  }else{
+    start={date:nd}; end={date:nextDateStr(nd)};
+  }
+  try{
+    await apiPatchEvent(CORRIERE_CAL, eventId, {start,end});
+    loadDay();  // il viaggio ora è nel piano del nuovo giorno
+  }catch(e){ alert('Errore nello spostamento:\n'+e.message); }
+}
 
 async function autorizzaViaggio(){
   if(!accessToken){alert('Accedi prima con Google.');return;}
@@ -1014,6 +1039,7 @@ function renderCorriere(){
 
   html+='<div class="card" style="margin-top:12px"><div class="card-header"><span class="card-title">Carichi del Corriere — modifica il giro</span></div>';
   colliCarried.concat(colli).forEach(c=>{
+    const eid=c.id.replace(/[^a-zA-Z0-9]/g,'_');
     const pickOpts=Object.keys(SEDI).map(code=>`<option value="${code}" ${code===c.from?'selected':''}>${SEDI[code].label}</option>`).join('');
     const sostituita=(c.from!==c.fromOrig);
     const seg=(s,lbl)=>`<button class="btn ${c.stato===s?'primary':''}" style="padding:3px 9px;font-size:11px" onclick="setColloStato('${c.id}','${s}')">${lbl}</button>`;
@@ -1021,6 +1047,15 @@ function renderCorriere(){
     const riga2 = c.carried
       ? `<span class="tag" style="background:var(--accent-light);color:var(--accent)">già a bordo da ieri</span>`
       : `<span>Carica da</span><select onchange="setColloPickup('${c.id}',this.value)" style="font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text-primary)">${pickOpts}</select>${sostituita?`<span class="tag" style="background:var(--orange-bg);color:var(--orange)">richiesta a ${SEDI[c.fromOrig]?.label||c.fromOrig}</span>`:''}`;
+    const spostaHtml = c.carried ? '' : `
+      <div style="margin-top:8px">
+        <button class="btn" style="padding:3px 9px;font-size:11px" onclick="document.getElementById('mv-${eid}').style.display='flex'"><i class="ti ti-calendar-event"></i> Sposta ad altra data</button>
+      </div>
+      <div id="mv-${eid}" style="display:none;gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap">
+        <span style="font-size:12px;color:var(--text-secondary)">Sposta a</span>
+        <input type="date" id="mvd-${eid}" style="font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid var(--border)">
+        <button class="btn primary" style="padding:3px 10px;font-size:11px" onclick="spostaCollo('${c.id}','${eid}')">Conferma</button>
+      </div>`;
     html+=`<div class="viaggio" style="cursor:default;${c.stato==='tolto'?'opacity:.5':''}">
       <div class="v-top" style="flex-wrap:wrap;gap:8px">
         <span class="v-route" style="flex:1 1 200px">${c.carried?'<i class="ti ti-package-import" style="color:var(--accent)"></i> ':''}${c.label}</span>
@@ -1030,6 +1065,7 @@ function renderCorriere(){
         ${riga2}
         <span style="color:var(--text-muted)"><i class="ti ti-arrow-right" style="font-size:12px"></i> consegna a ${SEDI[c.to]?.label||c.to}</span>
       </div>
+      ${spostaHtml}
     </div>`;
   });
   html+='</div>';
@@ -1048,6 +1084,7 @@ function renderCorriere(){
         const txt=gg===null?`entro ${fmtData(iso)}`:gg<0?`scaduto (${fmtData(iso)})`:gg===0?`scade oggi (${fmtData(iso)})`:`entro ${fmtData(iso)} (${gg} gg)`;
         scadHtml=`<span class="tag" style="background:transparent;color:${col};border:1px solid ${col}"><i class="ti ti-clock"></i> ${txt}</span>`;
       }
+      const feid=it.id.replace(/[^a-zA-Z0-9]/g,'_');
       html+=`<div class="viaggio" style="cursor:default">
         <div class="v-top" style="flex-wrap:wrap;gap:8px">
           <span class="v-route" style="flex:1 1 200px">${SEDI[it.from]?.label||it.from} <i class="ti ti-arrow-right" style="font-size:12px;color:#c8cdd6"></i> ${SEDI[it.to]?.label||it.to} — ${it.label}</span>
@@ -1055,6 +1092,14 @@ function renderCorriere(){
           <button class="btn ${incluso?'':'primary'}" style="padding:3px 10px;font-size:11px" onclick="toggleFlex('${it.id}')">${incluso?'<i class="ti ti-x"></i> Togli dal giro':'<i class="ti ti-plus"></i> Aggiungi al giro di oggi'}</button>
         </div>
         <div style="font-size:11px;color:var(--text-muted);margin-top:6px"><i class="ti ti-calendar-time"></i> finestra di ${it.giorniFinestra} giorni · ${incluso?'inserito nel giro di oggi':'in attesa, quando conviene'}</div>
+        <div style="margin-top:8px">
+          <button class="btn" style="padding:3px 9px;font-size:11px" onclick="document.getElementById('mv-${feid}').style.display='flex'"><i class="ti ti-calendar-event"></i> Fissa a una data</button>
+        </div>
+        <div id="mv-${feid}" style="display:none;gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap">
+          <span style="font-size:12px;color:var(--text-secondary)">Fissa al giorno</span>
+          <input type="date" id="mvd-${feid}" style="font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid var(--border)">
+          <button class="btn primary" style="padding:3px 10px;font-size:11px" onclick="spostaCollo('${it.id}','${feid}')">Conferma</button>
+        </div>
       </div>`;
     });
     html+='</div>';

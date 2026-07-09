@@ -1056,7 +1056,8 @@ function fmtMin(m){const h=Math.floor(m/60),mm=m%60;return h?`${h}h ${mm}′`:`$
 function corriereItems(){
   return viaggi.filter(v=>v.calId==='corrierelocom@gmail.com' && v.from!=='??' && v.to!=='??' && v.from!==v.to)
     .map(v=>({id:v.id, from:v.from, to:v.to, label:v.merce||v.summary||'(materiale)',
-              finestra:!!v.finestra, giorniFinestra:v.giorniFinestra||1, endDate:v.endDate||'', scadenza:v.scadenza||''}));
+              finestra:!!v.finestra, giorniFinestra:v.giorniFinestra||1, endDate:v.endDate||'', scadenza:v.scadenza||'',
+              pren:prenDi(v.id,(v.summary||'')+' '+(v.note||''))}));
 }
 
 // Heuristica: parti dalla base (Pisa), carica subito ciò che parte dalla base,
@@ -1144,9 +1145,66 @@ function setColloStato(id,s){ const k=corrDayKey(0); (corriereStato[k]=corriereS
 function setColloPickup(id,s){ const k=corrDayKey(0); corrierePickup[k]=corrierePickup[k]||{}; if(s) corrierePickup[k][id]=s; else delete corrierePickup[k][id]; renderCorriere(); }
 function setCorriereBase(v){ corriereBase=v; renderCorriere(); }
 
+// ── Prenotazioni/noleggi: i colli marcati sono protetti (non devono saltare).
+// Riconoscimento automatico dalle parole (NOL, NOLEGGIO, PRENOTATO, URGENTE,
+// CLIENTE) + marcatura manuale che vince su tutto.
+let prenotati=JSON.parse(localStorage.getItem('locom_prenotati')||'{}');
+function prenDi(id,testo){
+  if(prenotati[id]!==undefined) return !!prenotati[id];
+  return /NOLEGG|\bNOL\b|PRENOT|URGENT|CLIENTE/i.test(testo||'');
+}
+function togglePrenotato(id,testo){
+  prenotati[id]=!prenDi(id,testo);
+  try{localStorage.setItem('locom_prenotati',JSON.stringify(prenotati));}catch(e){}
+  renderCorriere();
+}
+
 // Spostamenti flessibili: inclusi nel giro solo se Franco lo decide, per singolo giorno.
 let corriereFlex={};
-let corriereLastPlan=null, corriereLastMeta=null, corriereLastFuori=[];
+let corriereLastPlan=null, corriereLastMeta=null, corriereLastFuori=[], corriereLastCtx=null;
+
+// ── Urgenze (radioline): Franco valuta l'impatto sul giro PRIMA di decidere.
+let __urg=null;
+function valutaUrgenza(){
+  const f=document.getElementById('urg-from')?.value, t=document.getElementById('urg-to')?.value;
+  const d=(document.getElementById('urg-desc')?.value||'').trim()||'urgenza';
+  const out=document.getElementById('urg-result');
+  if(!f||!t||f===t){ if(out)out.innerHTML='<span style="color:var(--red)">Scegli partenza e arrivo (diverse).</span>'; return; }
+  if(!corriereLastPlan||!corriereLastCtx){ if(out)out.innerHTML='Carica prima una giornata.'; return; }
+  __urg={f,t,d};
+  const extra={id:'__URG__',from:f,to:t,label:d,deliver:true,pren:true};
+  const ctx=corriereLastCtx;
+  let nuovo, fattibile=true, motivo='';
+  if(ctx.fisso){
+    nuovo=pianificaGiroFisso(ctx.seq, ctx.items.concat([extra]), ctx.carried);
+    if(nuovo.fuori.some(x=>x.id==='__URG__')){ fattibile=false; motivo='le sedi richieste non sono nell\'ordine del giro attuale (o l\'arrivo viene prima del carico)'; }
+  }else{
+    nuovo=pianificaGiro(corriereBase, ctx.items.concat([extra]), ctx.carried);
+  }
+  const dKm=nuovo.totKm-corriereLastPlan.totKm, dMin=nuovo.totMin-corriereLastPlan.totMin;
+  let h;
+  if(!fattibile){
+    h=`<div style="color:var(--red);font-weight:600"><i class="ti ti-x"></i> Non ci sta nel giro attuale</div>
+       <div style="font-size:12px;color:var(--text-secondary);margin:4px 0 8px">Motivo: ${motivo}. Franco può dirlo subito alla radio, senza stravolgere il piano.</div>`;
+  }else{
+    const col=dKm<=15?'var(--green)':dKm<=40?'var(--orange)':'var(--red)';
+    h=`<div style="font-weight:600;color:${col}"><i class="ti ti-route"></i> Impatto sul giro: +${dKm} km · +${fmtMin(dMin)}</div>
+       <div style="font-size:12px;color:var(--text-secondary);margin:4px 0 8px">Il giro resta quello: l'urgenza si infila nelle tappe esistenti. Decide Franco.</div>`;
+  }
+  h+=`<div style="display:flex;gap:6px;flex-wrap:wrap">
+    ${fattibile?`<button class="btn success" style="padding:4px 12px;font-size:12px" onclick="inserisciUrgenza(0)"><i class="ti ti-check"></i> Ci sta — inserisci oggi</button>`:''}
+    <button class="btn" style="padding:4px 12px;font-size:12px" onclick="inserisciUrgenza(1)"><i class="ti ti-calendar-plus"></i> Non ci sta — metti a domani</button>
+  </div>`;
+  if(out) out.innerHTML=h;
+}
+async function inserisciUrgenza(delta){
+  if(!__urg){alert('Valuta prima l\'urgenza.');return;}
+  if(!accessToken){alert('Accedi prima con Google.');return;}
+  const ds=corrDayKey(delta);
+  const body={summary:`${__urg.f}-${__urg.t} ${__urg.d} URGENTE`,description:'Inserito da valutazione urgenza (radio)',start:{date:ds},end:{date:nextDateStr(ds)}};
+  try{ await apiCreateEvent(CORRIERE_CAL, body); __urg=null; loadDay(); }
+  catch(e){ alert('Errore nello scrivere l\'urgenza:\n'+e.message); }
+}
 function stampaPiano(){
   if(!corriereLastPlan){alert('Apri il Giro Corriere e carica una giornata prima di stampare.');return;}
   const p=corriereLastPlan, m=corriereLastMeta;
@@ -1158,8 +1216,8 @@ function stampaPiano(){
   p.seq.forEach((s,i)=>{
     const nome=SEDI[s.code]?.label||s.code;
     const tag=s.start?' (partenza)':s.rientro?' (rientro)':'';
-    const sc=(s.scarica||[]).map(x=>x.label).join(', ')||'—';
-    const ca=[...(s.preloaded||[]).map(x=>x.label+' [da ieri]'),...(s.carica||[]).map(x=>x.label)].join(', ')||'—';
+    const sc=(s.scarica||[]).map(x=>(x.pren?'★ ':'')+x.label).join(', ')||'—';
+    const ca=[...(s.preloaded||[]).map(x=>(x.pren?'★ ':'')+x.label+' [da ieri]'),...(s.carica||[]).map(x=>(x.pren?'★ ':'')+x.label)].join(', ')||'—';
     const ab=(s.onboardAfter||[]).map(x=>`${x.label} → ${SEDI[x.to]?.label||x.to}`).join(', ')||'vuoto';
     h+=`<tr><td>${i}</td><td><b>${nome}</b>${tag}</td><td>${sc}</td><td>${ca}</td><td>${ab}</td><td>${s.km?s.km:''}</td></tr>`;
   });
@@ -1239,12 +1297,12 @@ function renderCorriere(){
   const colli=oggiItems.map(it=>{
     const stato=statoCollo(it.id);
     const from=pickupCollo(it.id)||it.from;
-    return {id:it.id, from, fromOrig:it.from, to:it.to, label:it.label, stato, deliver:(stato==='giro'), carried:false};
+    return {id:it.id, from, fromOrig:it.from, to:it.to, label:it.label, stato, deliver:(stato==='giro'), carried:false, pren:it.pren};
   });
   // colli GIÀ a bordo da ieri
   const colliCarried=carried.map(it=>{
     const stato=statoCollo(it.id);
-    return {id:it.id, from:it.from, fromOrig:it.from, to:it.to, label:it.label, stato, deliver:(stato==='giro'), carried:true};
+    return {id:it.id, from:it.from, fromOrig:it.from, to:it.to, label:it.label, stato, deliver:(stato==='giro'), carried:true, pren:prenDi(it.id,it.label)};
   });
   const inGiroTodayAll=colli.filter(c=>c.stato!=='tolto');
   const carriedActive=colliCarried.filter(c=>c.stato!=='tolto');
@@ -1252,13 +1310,10 @@ function renderCorriere(){
   const usaFisso=(modoGiro()==='fisso' && seqFissa.length>0);
 
   let plan, restaFuori;
+  const mapIt=c=>({id:c.id,from:c.from,to:c.to,label:c.label,deliver:c.deliver,pren:c.pren});
   if(usaFisso){
     // Segue l'ordine dato da Franco (doppi passaggi ammessi).
-    plan=pianificaGiroFisso(
-      seqFissa,
-      inGiroTodayAll.map(c=>({id:c.id,from:c.from,to:c.to,label:c.label,deliver:c.deliver})),
-      carriedActive.map(c=>({id:c.id,from:c.from,to:c.to,label:c.label,deliver:c.deliver}))
-    );
+    plan=pianificaGiroFisso(seqFissa, inGiroTodayAll.map(mapIt), carriedActive.map(mapIt));
     const fuoriIds=new Set(plan.fuori.map(x=>x.id));
     restaFuori=inGiroTodayAll.filter(c=>fuoriIds.has(c.id));
   }else{
@@ -1266,12 +1321,12 @@ function renderCorriere(){
     const inGiroToday=inGiroTodayAll.filter(c=>allowedSede(c.from)&&allowedSede(c.to));
     restaFuori=inGiroTodayAll.filter(c=>!(allowedSede(c.from)&&allowedSede(c.to)));
     const inGiroCarried=carriedActive.map(c=>({...c, deliver: c.deliver && allowedSede(c.to)}));
-    plan=pianificaGiro(
-      corriereBase,
-      inGiroToday.map(c=>({id:c.id,from:c.from,to:c.to,label:c.label,deliver:c.deliver})),
-      inGiroCarried.map(c=>({id:c.id,from:c.from,to:c.to,label:c.label,deliver:c.deliver}))
-    );
+    plan=pianificaGiro(corriereBase, inGiroToday.map(mapIt), inGiroCarried.map(mapIt));
   }
+  // Contesto per il valutatore di urgenza (radioline): ricalcola sul giro attuale.
+  corriereLastCtx={ fisso:usaFisso, seq:seqFissa.slice(),
+    items:(usaFisso?inGiroTodayAll:inGiroTodayAll.filter(c=>allowedSede(c.from)&&allowedSede(c.to))).map(mapIt),
+    carried:carriedActive.map(mapIt) };
   const fuoriSet=new Set(restaFuori.map(c=>c.id));
   // ciò che resta a bordo va nel giro di DOMANI
   corriereCarry[corrDayKey(1)]=plan.restano.map(x=>({id:x.id,from:x.from,to:x.to,label:x.label}));
@@ -1287,6 +1342,32 @@ function renderCorriere(){
       <div class="kpi-card"><div class="kpi-label">Tempo di guida</div><div class="kpi-val">${fmtMin(plan.totMin)}</div><div class="kpi-sub">soste carico escluse</div></div>
       <div class="kpi-card c-green"><div class="kpi-label">Colli / fermate</div><div class="kpi-val">${nColli}<span style="font-size:14px"> / ${nFermate}</span></div><div class="kpi-sub">nel giro</div></div>
     </div>`;
+
+  // Avviso: colli con prenotazione che rischiano di saltare
+  const prenRischio=[
+    ...restaFuori.filter(c=>c.pren).map(c=>({...c,perche:'fuori dal giro'})),
+    ...colli.concat(colliCarried).filter(c=>c.pren&&c.stato==='tolto').map(c=>({...c,perche:'tolto dal giro'})),
+    ...(plan.restano||[]).filter(x=>x.pren&&x.id!=='__URG__').map(x=>({...x,perche:'resta a bordo per domani'})),
+  ];
+  if(prenRischio.length){
+    html+='<div class="card" style="margin-top:12px;border-left:4px solid var(--red)"><div class="card-header"><span class="card-title" style="color:var(--red)"><i class="ti ti-alert-triangle"></i> Prenotazioni a rischio</span></div>'+
+      '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px">Queste attrezzature hanno un noleggio/prenotazione dietro: non dovrebbero saltare.</div>'+
+      prenRischio.map(c=>`<div style="font-size:13px;padding:4px 0">★ <b>${c.label}</b> — ${SEDI[c.from]?.label||c.from} → ${SEDI[c.to]?.label||c.to} · <span style="color:var(--red)">${c.perche}</span></div>`).join('')+
+      '</div>';
+  }
+
+  // Valutazione urgenza (radioline)
+  const sedeOpts=Object.keys(SEDI).map(c=>`<option value="${c}">${SEDI[c].label}</option>`).join('');
+  html+=`<div class="card" style="margin-top:12px"><div class="card-header"><span class="card-title"><i class="ti ti-broadcast"></i> Urgenza dalla radio — ci sta nel giro?</span></div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px">
+      <select id="urg-from" style="font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid var(--border);background:var(--surface)"><option value="">Da…</option>${sedeOpts}</select>
+      <i class="ti ti-arrow-right" style="color:#c8cdd6"></i>
+      <select id="urg-to" style="font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid var(--border);background:var(--surface)"><option value="">A…</option>${sedeOpts}</select>
+      <input type="text" id="urg-desc" placeholder="cosa serve (es. generatore x cliente)" style="flex:1 1 160px;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid var(--border)">
+      <button class="btn primary" style="padding:4px 12px;font-size:12px" onclick="valutaUrgenza()">Valuta</button>
+    </div>
+    <div id="urg-result" style="margin-top:10px"></div>
+  </div>`;
 
   // Impostazione giro: automatico oppure ordine fisso deciso da Franco
   const modo=modoGiro();
@@ -1349,6 +1430,7 @@ function renderCorriere(){
     const sostituita=(c.from!==c.fromOrig);
     const seg=(s,lbl)=>`<button class="btn ${c.stato===s?'primary':''}" style="padding:3px 9px;font-size:11px" onclick="setColloStato('${c.id}','${s}')">${lbl}</button>`;
     const bordoLbl=c.carried?'Ancora a bordo':'Tieni a bordo';
+    const prenBtn=`<button class="btn" style="padding:3px 8px;font-size:11px;${c.pren?'color:#b45309;font-weight:600':''}" onclick="togglePrenotato('${c.id}','${(c.label||'').replace(/'/g,'')}')" title="Prenotazione/noleggio dietro a questo collo">${c.pren?'★ Prenotato':'☆ Prenota'}</button>`;
     const riga2 = c.carried
       ? `<span class="tag" style="background:var(--accent-light);color:var(--accent)">già a bordo da ieri</span>`
       : `<span>Carica da</span><select onchange="setColloPickup('${c.id}',this.value)" style="font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text-primary)">${pickOpts}</select>${sostituita?`<span class="tag" style="background:var(--orange-bg);color:var(--orange)">richiesta a ${SEDI[c.fromOrig]?.label||c.fromOrig}</span>`:''}`;
@@ -1363,8 +1445,8 @@ function renderCorriere(){
       </div>`;
     html+=`<div class="viaggio" style="cursor:default;${c.stato==='tolto'?'opacity:.5':''}">
       <div class="v-top" style="flex-wrap:wrap;gap:8px">
-        <span class="v-route" style="flex:1 1 200px">${c.carried?'<i class="ti ti-package-import" style="color:var(--accent)"></i> ':''}${c.label}</span>
-        <div style="display:flex;gap:4px">${seg('giro','In giro')}${seg('bordo',bordoLbl)}${seg('tolto','Togli')}</div>
+        <span class="v-route" style="flex:1 1 200px">${c.carried?'<i class="ti ti-package-import" style="color:var(--accent)"></i> ':''}${c.pren?'<span style="color:#b45309">★</span> ':''}${c.label}</span>
+        <div style="display:flex;gap:4px">${prenBtn}${seg('giro','In giro')}${seg('bordo',bordoLbl)}${seg('tolto','Togli')}</div>
       </div>
       <div style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12px;color:var(--text-secondary);flex-wrap:wrap">
         ${riga2}

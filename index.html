@@ -1191,18 +1191,21 @@ function valutaUrgenza(){
     h=`<div style="font-weight:600;color:${col}"><i class="ti ti-route"></i> Impatto sul giro: +${dKm} km · +${fmtMin(dMin)}</div>
        <div style="font-size:12px;color:var(--text-secondary);margin:4px 0 8px">Il giro resta quello: l'urgenza si infila nelle tappe esistenti. Decide Franco.</div>`;
   }
+  const dEnc=encodeURIComponent(d);
   h+=`<div style="display:flex;gap:6px;flex-wrap:wrap">
-    ${fattibile?`<button class="btn success" style="padding:4px 12px;font-size:12px" onclick="inserisciUrgenza(0)"><i class="ti ti-check"></i> Ci sta — inserisci oggi</button>`:''}
-    <button class="btn" style="padding:4px 12px;font-size:12px" onclick="inserisciUrgenza(1)"><i class="ti ti-calendar-plus"></i> Non ci sta — metti a domani</button>
+    ${fattibile?`<button class="btn success" style="padding:4px 12px;font-size:12px" onclick="inserisciUrgenza(0,'${f}','${t}','${dEnc}')"><i class="ti ti-check"></i> Ci sta — inserisci oggi</button>`:''}
+    <button class="btn" style="padding:4px 12px;font-size:12px" onclick="inserisciUrgenza(1,'${f}','${t}','${dEnc}')"><i class="ti ti-calendar-plus"></i> Non ci sta — metti a domani</button>
   </div>`;
   if(out) out.innerHTML=h;
 }
-async function inserisciUrgenza(delta){
-  if(!__urg){alert('Valuta prima l\'urgenza.');return;}
+async function inserisciUrgenza(delta,f,t,dEnc){
+  // I dati arrivano direttamente dal pulsante (niente stato che si può perdere).
+  if(!f||!t){alert('Rifai la valutazione: dati mancanti.');return;}
+  const d=decodeURIComponent(dEnc||'')||'urgenza';
   if(!accessToken){alert('Accedi prima con Google.');return;}
   const ds=corrDayKey(delta);
-  const body={summary:`${__urg.f}-${__urg.t} ${__urg.d} URGENTE`,description:'Inserito da valutazione urgenza (radio)',start:{date:ds},end:{date:nextDateStr(ds)}};
-  try{ await apiCreateEvent(CORRIERE_CAL, body); __urg=null; loadDay(); }
+  const body={summary:`${f}-${t} ${d} URGENTE`,description:'Inserito da valutazione urgenza (radio)',start:{date:ds},end:{date:nextDateStr(ds)}};
+  try{ await apiCreateEvent(CORRIERE_CAL, body); loadDay(); }
   catch(e){ alert('Errore nello scrivere l\'urgenza:\n'+e.message); }
 }
 function stampaPiano(){

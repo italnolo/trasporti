@@ -356,6 +356,13 @@ body{font-family:var(--font);background:var(--bg);color:var(--text-primary);min-
 
 </main>
 <div id="print-area"></div>
+<div id="js-error" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;background:#b42318;color:#fff;font:12px/1.4 monospace;padding:8px 12px"></div>
+<script>
+window.addEventListener('error',function(e){
+  var b=document.getElementById('js-error');
+  if(b){b.style.display='block';b.textContent='Errore: '+(e.message||'')+' — riga '+(e.lineno||'?')+' (fai uno screenshot e mandamelo)';}
+});
+</script>
 </div>
 
 <script>
@@ -1131,6 +1138,7 @@ function pianificaGiroFisso(seqCodes, items, startOnboard){
   return {seq:stops, totKm, totMin, restano:onboard.slice(), fuori};
 }
 
+function statoCollo(id){ const d=corriereStato[corrDayKey(0)]; return (d&&d[id])||'giro'; }
 function pickupCollo(id){ const d=corrierePickup[corrDayKey(0)]; return d&&d[id]; }
 function setColloStato(id,s){ const k=corrDayKey(0); (corriereStato[k]=corriereStato[k]||{})[id]=s; renderCorriere(); }
 function setColloPickup(id,s){ const k=corrDayKey(0); corrierePickup[k]=corrierePickup[k]||{}; if(s) corrierePickup[k][id]=s; else delete corrierePickup[k][id]; renderCorriere(); }
@@ -1371,7 +1379,7 @@ function renderCorriere(){
   if(restaFuori.length){
     html+='<div class="card" style="margin-top:12px"><div class="card-header"><span class="card-title">Restano fuori</span><span style="font-size:11px;color:var(--text-muted)">sedi non toccate oggi</span></div>';
     restaFuori.forEach(c=>{
-      const eid=c.id.replace(/[^a-zA-Z0-9]/g,'_');
+      const eid=(c.id+'_f').replace(/[^a-zA-Z0-9]/g,'_');
       html+=`<div class="viaggio" style="cursor:default">
         <div class="v-top" style="flex-wrap:wrap;gap:8px">
           <span class="v-route" style="flex:1 1 200px">${SEDI[c.from]?.label||c.from} <i class="ti ti-arrow-right" style="font-size:12px;color:#c8cdd6"></i> ${SEDI[c.to]?.label||c.to} — ${c.label}</span>
@@ -1401,7 +1409,7 @@ function renderCorriere(){
         const txt=gg===null?`entro ${fmtData(iso)}`:gg<0?`scaduto (${fmtData(iso)})`:gg===0?`scade oggi (${fmtData(iso)})`:`entro ${fmtData(iso)} (${gg} gg)`;
         scadHtml=`<span class="tag" style="background:transparent;color:${col};border:1px solid ${col}"><i class="ti ti-clock"></i> ${txt}</span>`;
       }
-      const feid=it.id.replace(/[^a-zA-Z0-9]/g,'_');
+      const feid=(it.id+'_x').replace(/[^a-zA-Z0-9]/g,'_');
       html+=`<div class="viaggio" style="cursor:default">
         <div class="v-top" style="flex-wrap:wrap;gap:8px">
           <span class="v-route" style="flex:1 1 200px">${SEDI[it.from]?.label||it.from} <i class="ti ti-arrow-right" style="font-size:12px;color:#c8cdd6"></i> ${SEDI[it.to]?.label||it.to} — ${it.label}</span>
@@ -1430,11 +1438,18 @@ function renderCorriere(){
 
   body.innerHTML=html;
   disegnaMappaCorriere(plan);
+  saveGiroState();
 }
+function saveGiroState(){ try{ localStorage.setItem('locom_giro_state', JSON.stringify({stato:corriereStato,pickup:corrierePickup,flex:corriereFlex,modo:corriereModo,fisso:corriereGiroFisso,sedi:corriereSedi})); }catch(e){} }
+function loadGiroState(){ try{ const s=JSON.parse(localStorage.getItem('locom_giro_state')||'{}'); if(s.stato)corriereStato=s.stato; if(s.pickup)corrierePickup=s.pickup; if(s.flex)corriereFlex=s.flex; if(s.modo)corriereModo=s.modo; if(s.fisso)corriereGiroFisso=s.fisso; if(s.sedi)corriereSedi=s.sedi; }catch(e){} }
+loadGiroState();
 
 function disegnaMappaCorriere(plan){
+ try{
   const el=document.getElementById('corr-map');
   if(!el || typeof L==='undefined') return;
+  // Il contenitore viene ricreato a ogni render: se la mappa è legata a un nodo vecchio, la rifaccio.
+  if(corriereMap && corriereMap.getContainer()!==el){ try{corriereMap.remove();}catch(e){} corriereMap=null; corriereLayer=null; }
   if(!corriereMap){
     corriereMap=L.map(el).setView([SEDE_GEO[corriereBase].lat,SEDE_GEO[corriereBase].lng],9);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'© OpenStreetMap'}).addTo(corriereMap);
@@ -1451,6 +1466,7 @@ function disegnaMappaCorriere(plan){
   if(pts.length>1) L.polyline(pts,{color:'#1a56db',weight:3,opacity:.7,dashArray:'6 6'}).addTo(corriereLayer);
   if(pts.length) corriereMap.fitBounds(pts,{padding:[30,30]});
   setTimeout(()=>{try{corriereMap.invalidateSize();}catch(e){}},80);
+ }catch(e){ console.error('Mappa:',e); }
 }
 
 // init date labels

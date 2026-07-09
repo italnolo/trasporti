@@ -661,9 +661,9 @@ function renderViaggioCard(v,ottimiz){
     : isCorriere ? `<span class="tag tag-pending">da autorizzare</span>` : '';
   const tp=tipoDe(v); const tpMeta=TIPI[tp]||TIPI.attivita;
   const tipoBadge = tp!=='viaggio' ? `<span class="tag" style="background:${tpMeta.color}22;color:${tpMeta.color}"><i class="ti ${tpMeta.icon}" style="font-size:10px"></i> ${tpMeta.label}</span>` : '';
-  const tipoSelect = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:12px;color:var(--text-secondary)">
+  const tipoSelect = `<div onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:12px;color:var(--text-secondary)">
         <span>Tipo evento</span>
-        <select onchange="event.stopPropagation();setTipo('${v.id}',this.value)" style="font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text-primary)">
+        <select onclick="event.stopPropagation()" onchange="event.stopPropagation();setTipo('${v.id}',this.value)" style="font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text-primary)">
           ${Object.keys(TIPI).map(k=>`<option value="${k}" ${k===tp?'selected':''}>${TIPI[k].label}</option>`).join('')}
         </select>
       </div>`;
@@ -691,10 +691,10 @@ function renderViaggioCard(v,ottimiz){
       </div>
       <div class="af" id="af-${eid}">
         <div class="af-grid">
-          <div><label>Mezzo / targa</label><select id="afm-${eid}"><option value="">Seleziona</option>${mezziOpts}</select></div>
-          <div><label>Autista</label><input type="text" id="afa-${eid}" placeholder="Nome autista"></div>
+          <div><label>Mezzo / targa</label><select id="afm-${eid}" onclick="event.stopPropagation()"><option value="">Seleziona</option>${mezziOpts}</select></div>
+          <div><label>Autista</label><input type="text" id="afa-${eid}" onclick="event.stopPropagation()" placeholder="Nome autista"></div>
         </div>
-        <div style="margin-bottom:8px"><label>Note</label><input type="text" id="afn-${eid}" placeholder="Note..."></div>
+        <div style="margin-bottom:8px"><label>Note</label><input type="text" id="afn-${eid}" onclick="event.stopPropagation()" placeholder="Note..."></div>
         <div class="btn-row">
           <button class="btn primary" onclick="event.stopPropagation();confermaAutorizza('${v.id}','${eid}')"><i class="ti ti-check"></i> Conferma</button>
           <button class="btn" onclick="event.stopPropagation();document.getElementById('af-${eid}').classList.remove('open')">Annulla</button>

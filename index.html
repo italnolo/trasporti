@@ -168,6 +168,20 @@ body{font-family:var(--font);background:var(--bg);color:var(--text-primary);min-
   .form-grid{grid-template-columns:1fr}
   .af-grid{grid-template-columns:1fr}
 }
+#print-area{display:none}
+#print-area .pt-title{font-size:20px;font-weight:bold}
+#print-area .pt-sub{font-size:12px;margin:2px 0 12px}
+#print-area table.pt{width:100%;border-collapse:collapse;font-size:12px}
+#print-area table.pt th,#print-area table.pt td{border:1px solid #999;padding:5px 6px;text-align:left;vertical-align:top}
+#print-area table.pt th{background:#eee}
+#print-area .pt-note{margin-top:10px;font-size:12px;font-weight:bold}
+#print-area .pt-foot{margin-top:18px;font-size:10px;color:#666}
+@media print{
+  .topbar,.sidebar{display:none!important}
+  body *{visibility:hidden}
+  #print-area,#print-area *{visibility:visible}
+  #print-area{display:block!important;position:absolute;top:0;left:0;width:100%;padding:8mm;color:#000}
+}
 </style>
 </head>
 <body>
@@ -272,6 +286,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text-primary);min-
       <label style="font-size:12px;color:var(--text-muted)">Base di Franco</label>
       <select id="corr-base" onchange="setCorriereBase(this.value)" style="font-size:13px;padding:7px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text-primary);font-family:var(--font)"></select>
       <span style="font-size:11px;color:var(--text-muted)">parte e rientra qui</span>
+      <button class="btn" style="margin-left:auto" onclick="stampaPiano()"><i class="ti ti-printer"></i> Stampa piano</button>
     </div>
     <div id="corr-body"><div class="loading-row"><span class="spinner"></span> Carico...</div></div>
   </div>
@@ -323,6 +338,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text-primary);min-
   </div>
 
 </main>
+<div id="print-area"></div>
 </div>
 
 <script>
@@ -454,6 +470,28 @@ function parseRoute(summary){
 }
 function parseMerce(summary){return (summary||'').replace(/^[A-Z]{2}[\s\-–>→A-Z]{2,12}/,'').trim().replace(/^[-–\s]+/,'');}
 
+// Tipologie di evento: divide i viaggi dalle altre attività (assenze, tagliandi, montaggi…).
+const TIPI={
+  viaggio:     {label:'Viaggio',              color:'#1a56db', icon:'ti-truck'},
+  attivita:    {label:'Attività',             color:'#7c3aed', icon:'ti-tool'},
+  manutenzione:{label:'Manutenzione',         color:'#b45309', icon:'ti-settings'},
+  montaggio:   {label:'Montaggio/assistenza', color:'#0a7d4b', icon:'ti-tools'},
+  assenza:     {label:'Assenza',              color:'#b42318', icon:'ti-user-off'},
+  nocorriere:  {label:'No corriere',          color:'#5b6472', icon:'ti-ban'},
+};
+function rilevaTipo(from,to,summary){
+  if(from!=='??' && to!=='??' && from!==to) return 'viaggio';
+  const s=(summary||'').toLowerCase();
+  if(/no\s*corriere|niente corriere|corriere\s*no/.test(s)) return 'nocorriere';
+  if(/assen|ferie|permess|malatt|riposo|libero/.test(s)) return 'assenza';
+  if(/tagliand|manutenz|revision|riparaz|officin|gomm|guast/.test(s)) return 'manutenzione';
+  if(/montagg|smontagg|installaz|sopralluog|assistenz|\bposa\b/.test(s)) return 'montaggio';
+  return 'attivita';
+}
+let tipoOverride=JSON.parse(localStorage.getItem('locom_tipo')||'{}');
+function tipoDe(v){ return tipoOverride[v.id]||v.tipo||'attivita'; }
+function setTipo(id,t){ if(t) tipoOverride[id]=t; else delete tipoOverride[id]; try{localStorage.setItem('locom_tipo',JSON.stringify(tipoOverride));}catch(e){} renderToday(); }
+
 function buildViaggio(ev, calId){
   const route=parseRoute(ev.summary||'');
   const isAllDay=!ev.start?.dateTime;
@@ -483,6 +521,7 @@ function buildViaggio(ev, calId){
     note:desc,status:targaM?.[1]?'autorizzato':'pending',
     calId:calId||'',start:ev.start?.dateTime||ev.start?.date||'',
     finestra,giorniFinestra,startDate:sDate,endDate:eDate,scadenza:scad,
+    tipo:rilevaTipo(route?.from||'??',route?.to||'??',ev.summary||''),
   };
 }
 // Estrae una data gg/mm o gg/mm/aa da un testo e la ritorna come ISO (YYYY-MM-DD), o ''.
@@ -620,16 +659,26 @@ function renderViaggioCard(v,ottimiz){
     ? `<span class="tag tag-auth"><i class="ti ti-check" style="font-size:10px"></i> ${v.targa}</span>`
     : abbinato ? `<span class="tag tag-ott"><i class="ti ti-route" style="font-size:10px"></i> ottimizzabile</span>`
     : isCorriere ? `<span class="tag tag-pending">da autorizzare</span>` : '';
+  const tp=tipoDe(v); const tpMeta=TIPI[tp]||TIPI.attivita;
+  const tipoBadge = tp!=='viaggio' ? `<span class="tag" style="background:${tpMeta.color}22;color:${tpMeta.color}"><i class="ti ${tpMeta.icon}" style="font-size:10px"></i> ${tpMeta.label}</span>` : '';
+  const tipoSelect = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:12px;color:var(--text-secondary)">
+        <span>Tipo evento</span>
+        <select onchange="event.stopPropagation();setTipo('${v.id}',this.value)" style="font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text-primary)">
+          ${Object.keys(TIPI).map(k=>`<option value="${k}" ${k===tp?'selected':''}>${TIPI[k].label}</option>`).join('')}
+        </select>
+      </div>`;
   return `<div class="${cls}" id="vc-${eid}" onclick="toggleDetail('${eid}')">
     <div class="v-top">
       <span class="v-time">${timeLabel}</span>
       ${routeHtml}
       ${tagHtml}
+      ${tipoBadge}
       ${v.finestra?`<span class="tag" style="background:var(--surface-2);color:var(--text-secondary)"><i class="ti ti-calendar-time" style="font-size:10px"></i> finestra ${v.giorniFinestra}gg</span>`:''}
     </div>
     ${hasRoute?`<div class="v-merce">${v.merce||v.summary}</div>`:''}
     ${abbinato&&v.status!=='autorizzato'?`<div style="font-size:11px;color:var(--green);margin-top:4px;padding-left:62px"><i class="ti ti-bulb"></i> ${abbinato.msg}</div>`:''}
     <div class="v-detail" id="detail-${eid}">
+      ${tipoSelect}
       <div class="v-meta">
         ${v.targa?`<span><i class="ti ti-truck"></i> ${v.targa}</span>`:''}
         ${v.autista?`<span><i class="ti ti-user"></i> ${v.autista}</span>`:''}
@@ -948,6 +997,28 @@ function setCorriereBase(v){ corriereBase=v; renderCorriere(); }
 
 // Spostamenti flessibili: inclusi nel giro solo se Franco lo decide, per singolo giorno.
 let corriereFlex={};
+let corriereLastPlan=null, corriereLastMeta=null;
+function stampaPiano(){
+  if(!corriereLastPlan){alert('Apri il Giro Corriere e carica una giornata prima di stampare.');return;}
+  const p=corriereLastPlan, m=corriereLastMeta;
+  const [y,mo,d]=m.data.split('-'); const dataFmt=`${d}/${mo}/${y}`;
+  let h=`<div class="pt-title">Piano viaggi Corriere — Franco</div>
+    <div class="pt-sub">Giornata ${dataFmt} · base ${SEDI[m.base]?.label||m.base} · ${p.totKm} km stimati · ${fmtMin(p.totMin)} di guida · ${m.nColli} colli</div>
+    <table class="pt"><thead><tr><th>#</th><th>Sede</th><th>Scarica</th><th>Carica</th><th>A bordo dopo</th><th>km</th></tr></thead><tbody>`;
+  p.seq.forEach((s,i)=>{
+    const nome=SEDI[s.code]?.label||s.code;
+    const tag=s.start?' (partenza)':s.rientro?' (rientro)':'';
+    const sc=(s.scarica||[]).map(x=>x.label).join(', ')||'—';
+    const ca=[...(s.preloaded||[]).map(x=>x.label+' [da ieri]'),...(s.carica||[]).map(x=>x.label)].join(', ')||'—';
+    const ab=(s.onboardAfter||[]).map(x=>`${x.label} → ${SEDI[x.to]?.label||x.to}`).join(', ')||'vuoto';
+    h+=`<tr><td>${i}</td><td><b>${nome}</b>${tag}</td><td>${sc}</td><td>${ca}</td><td>${ab}</td><td>${s.km?s.km:''}</td></tr>`;
+  });
+  h+='</tbody></table>';
+  if(p.restano&&p.restano.length) h+=`<div class="pt-note">Resta a bordo per il giorno dopo: ${p.restano.map(x=>x.label+' → '+(SEDI[x.to]?.label||x.to)).join(', ')}</div>`;
+  h+=`<div class="pt-foot">Lo.Com — foglio di viaggio Corriere · distanze stimate</div>`;
+  document.getElementById('print-area').innerHTML=h;
+  window.print();
+}
 function flexIncluso(id){ const d=corriereFlex[corrDayKey(0)]; return !!(d&&d[id]); }
 function toggleFlex(id){ const k=corrDayKey(0); corriereFlex[k]=corriereFlex[k]||{}; if(corriereFlex[k][id]) delete corriereFlex[k][id]; else corriereFlex[k][id]=true; renderCorriere(); }
 // Scadenza di un flessibile: data nel testo, oppure ultimo giorno della finestra.
@@ -1007,6 +1078,7 @@ function renderCorriere(){
   try{localStorage.setItem('locom_corriere_carry',JSON.stringify(corriereCarry));}catch(e){}
   const nColli=inGiroToday.length+inGiroCarried.length;
   const nFermate=plan.seq.filter(s=>!s.start&&!s.rientro).length;
+  corriereLastPlan=plan; corriereLastMeta={data:corrDayKey(0),base:corriereBase,nColli,nFermate};
 
   let html=`
     <div class="kpi-row" style="grid-template-columns:repeat(3,1fr)">

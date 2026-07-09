@@ -274,7 +274,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text-primary);min-
   <!-- OTTIMIZZAZIONI -->
   <div id="view-ottimiz" style="display:none">
     <div style="font-size:22px;font-weight:600;margin-bottom:4px">Ottimizzazioni</div>
-    <div style="font-size:12px;color:var(--text-muted);margin-bottom:20px">Tratte A/R e concatenazioni per eliminare viaggi a vuoto.</div>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:20px">Dove un mezzo rischia di viaggiare a vuoto: andata/ritorno e tratte da concatenare. Segna “gestito” quelle che hai sistemato.</div>
     <div id="ottimiz-list"></div>
   </div>
 
@@ -556,18 +556,25 @@ function parseScadenza(txt){
   return `${a}-${String(me).padStart(2,'0')}-${String(g).padStart(2,'0')}`;
 }
 
+let ottGestite=JSON.parse(localStorage.getItem('locom_ott_gestite')||'{}');
 function detectOttimizzazioni(lista){
   const sugg=[];
-  const valid=lista.filter(v=>v.from!=='??'&&v.to!=='??');
+  const valid=lista.filter(v=>v.from!=='??'&&v.to!=='??'&&v.from!==v.to);
   for(let i=0;i<valid.length;i++){
     for(let j=i+1;j<valid.length;j++){
       const a=valid[i],b=valid[j];
-      if(a.from===b.to&&a.to===b.from) sugg.push({tipo:'ar',a,b,msg:`Tratta A/R: ${SEDI[a.from]?.label}↔${SEDI[a.to]?.label} — stesso mezzo può fare A/R con carico`});
-      else if(a.to===b.from&&!a.targa&&!b.targa) sugg.push({tipo:'concat',a,b,msg:`${SEDI[a.from]?.label}→${SEDI[a.to]?.label} poi ${SEDI[b.from]?.label}→${SEDI[b.to]?.label} — concatenabili`});
+      if(a.calId!==b.calId) continue;                 // stessa flotta/calendario
+      let o=null;
+      if(a.from===b.to&&a.to===b.from) o={tipo:'ar',a,b};
+      else if(a.to===b.from) o={tipo:'concat',a,b};
+      else if(b.to===a.from) o={tipo:'concat',a:b,b:a};
+      if(o){ o.key=[a.id,b.id].sort().join('|'); if(!ottGestite[o.key]) sugg.push(o); }
     }
   }
   return sugg;
 }
+function gestisciOtt(key){ ottGestite[key]=true; try{localStorage.setItem('locom_ott_gestite',JSON.stringify(ottGestite));}catch(e){} renderOttimiz(detectOttimizzazioni(viaggi)); renderToday(); }
+function ripristinaOtt(){ ottGestite={}; try{localStorage.setItem('locom_ott_gestite','{}');}catch(e){} renderOttimiz(detectOttimizzazioni(viaggi)); renderToday(); }
 
 // ── CARICA CALENDAR ──
 async function loadDay(){
@@ -765,13 +772,27 @@ function filterSede(code,el){
 
 function renderOttimiz(ottimiz){
   const el=document.getElementById('ottimiz-list');
-  if(!ottimiz||!ottimiz.length){el.innerHTML='<div class="empty"><i class="ti ti-route"></i> Nessuna ottimizzazione rilevata.</div>';return;}
-  el.innerHTML=ottimiz.map(o=>`
-    <div class="ott-card">
-      <div class="ott-title"><i class="ti ti-${o.tipo==='ar'?'arrows-exchange':'route'}"></i>${o.tipo==='ar'?'Viaggio A/R — carico di ritorno possibile':'Tratte concatenabili'}</div>
-      <div class="ott-desc">${o.msg}</div>
-      <span class="ott-pill">${o.a.summary}</span><span class="ott-pill">${o.b.summary}</span>
-    </div>`).join('');
+  const haGestite=Object.keys(ottGestite).length>0;
+  if(!ottimiz||!ottimiz.length){
+    el.innerHTML='<div class="empty"><i class="ti ti-route"></i> Nessuna ottimizzazione da segnalare per questo giorno.</div>'+
+      (haGestite?'<div style="margin-top:12px"><button class="btn" style="padding:3px 10px;font-size:11px" onclick="ripristinaOtt()"><i class="ti ti-rotate"></i> Ripristina le segnalazioni gestite</button></div>':'');
+    return;
+  }
+  const rotta=v=>`${SEDI[v.from]?.label||v.from} → ${SEDI[v.to]?.label||v.to}`;
+  const merce=v=>(v.merce||v.summary||'').toString();
+  el.innerHTML=ottimiz.map(o=>{
+    const cal=calMeta(o.a.calId).label;
+    const testo = o.tipo==='ar'
+      ? `Un mezzo può fare <b>${rotta(o.a)}</b> e al ritorno <b>${rotta(o.b)}</b> con un carico, invece di rientrare a vuoto.`
+      : `Dopo <b>${rotta(o.a)}</b> si può proseguire con <b>${rotta(o.b)}</b> senza rientrare in sede in mezzo.`;
+    return `<div class="ott-card">
+      <div class="ott-title"><i class="ti ti-${o.tipo==='ar'?'arrows-exchange':'route'}"></i> ${o.tipo==='ar'?'Ritorno a vuoto evitabile':'Tratte da concatenare'} <span style="font-weight:400;color:var(--text-muted);font-size:11px">· ${cal}</span></div>
+      <div class="ott-desc">${testo}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0"><span class="ott-pill">${rotta(o.a)} · ${merce(o.a)}</span><span class="ott-pill">${rotta(o.b)} · ${merce(o.b)}</span></div>
+      <button class="btn" style="padding:3px 10px;font-size:11px" onclick="gestisciOtt('${o.key}')"><i class="ti ti-check"></i> Segna come gestito</button>
+    </div>`;
+  }).join('');
+  if(haGestite) el.innerHTML+='<div style="margin-top:12px"><button class="btn" style="padding:3px 10px;font-size:11px" onclick="ripristinaOtt()"><i class="ti ti-rotate"></i> Ripristina le segnalazioni gestite</button></div>';
 }
 
 function renderAutomezzi(){
@@ -1140,6 +1161,12 @@ function giroSeq(){ return corriereGiroFisso[corrDayKey(0)]||[]; }
 function addTappa(code){ const k=corrDayKey(0); (corriereGiroFisso[k]=corriereGiroFisso[k]||[]).push(code); renderCorriere(); }
 function removeTappa(i){ const s=giroSeq(); s.splice(i,1); renderCorriere(); }
 function svuotaGiro(){ corriereGiroFisso[corrDayKey(0)]=[]; renderCorriere(); }
+// Porta l'ordine appena calcolato in automatico dentro la modalità manuale, per rifinirlo.
+function autoAManuale(){
+  const p=corriereLastPlan;
+  if(p&&p.seq&&p.seq.length){ corriereGiroFisso[corrDayKey(0)]=p.seq.map(s=>s.code); }
+  setModo('fisso');
+}
 
 function renderCorriere(){
   const host=document.getElementById('view-corriere');
@@ -1227,6 +1254,7 @@ function renderCorriere(){
       html+=`<button class="btn ${on?'primary':''}" style="padding:4px 12px;font-size:12px;${isBase?'opacity:.6;cursor:default':''}" ${isBase?'':`onclick="toggleSede('${code}')"`}>${SEDI[code].label}${isBase?' (base)':''}</button>`;
     });
     html+='</div>';
+    html+='<div style="margin-top:10px"><button class="btn" style="padding:4px 12px;font-size:12px" onclick="autoAManuale()"><i class="ti ti-list-numbers"></i> Modifica l\'ordine a mano</button> <span style="font-size:11px;color:var(--text-muted)">porta questo giro in manuale, poi riordina o aggiungi passaggi doppi</span></div>';
   }else{
     const seq=giroSeq();
     html+='<div style="font-size:12px;color:var(--text-secondary);margin:6px 0 6px">Aggiungi tappa (anche più volte la stessa sede):</div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">';

@@ -576,6 +576,41 @@ function detectOttimizzazioni(lista){
 function gestisciOtt(key){ ottGestite[key]=true; try{localStorage.setItem('locom_ott_gestite',JSON.stringify(ottGestite));}catch(e){} renderOttimiz(detectOttimizzazioni(viaggi)); renderToday(); }
 function ripristinaOtt(){ ottGestite={}; try{localStorage.setItem('locom_ott_gestite','{}');}catch(e){} renderOttimiz(detectOttimizzazioni(viaggi)); renderToday(); }
 
+// Comandi sui singoli viaggi (usati nelle Ottimizzazioni): scrivono su Google.
+function azioniViaggioHtml(v, uid){
+  const mopts=automezzi.map(m=>`<option value="${m.targa}">${m.targa} — ${m.nome}${!m.disp?' (occupato)':''}</option>`).join('');
+  return `<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;font-size:12px;padding:8px;background:var(--surface-2);border-radius:8px">
+    <span style="font-weight:600;flex:1 1 140px">${SEDI[v.from]?.label||v.from} → ${SEDI[v.to]?.label||v.to}</span>
+    <select id="om-${uid}" style="font-size:12px;padding:4px 6px;border-radius:6px;border:1px solid var(--border);background:var(--surface)"><option value="">Mezzo…</option>${mopts}</select>
+    <button class="btn" style="padding:3px 8px;font-size:11px" onclick="assegnaMezzoEvento('${v.calId}','${v.id}','${uid}')">Assegna</button>
+    <input type="date" id="od-${uid}" style="font-size:12px;padding:4px 6px;border-radius:6px;border:1px solid var(--border)">
+    <button class="btn" style="padding:3px 8px;font-size:11px" onclick="spostaEvento('${v.calId}','${v.id}','${uid}')">Sposta</button>
+  </div>`;
+}
+async function assegnaMezzoEvento(calId,eventId,uid){
+  const targa=document.getElementById('om-'+uid)?.value;
+  if(!targa){alert('Scegli un mezzo.');return;}
+  if(!accessToken){alert('Accedi prima con Google.');return;}
+  const v=viaggi.find(x=>x.id===eventId);
+  const lines=(v&&v.note?v.note.split('\n'):[]).filter(l=>!/^\s*mezzo:/i.test(l));
+  lines.push('Mezzo: '+targa);
+  try{
+    await apiPatchEvent(calId, eventId, {description:lines.join('\n')});
+    const m=automezzi.find(x=>x.targa===targa); if(m){m.disp=false;saveAutomezzi();}
+    loadDay();
+  }catch(e){ alert('Errore nell\'assegnare il mezzo:\n'+e.message); }
+}
+async function spostaEvento(calId,eventId,uid){
+  const nd=document.getElementById('od-'+uid)?.value;
+  if(!nd){alert('Scegli la nuova data.');return;}
+  if(!accessToken){alert('Accedi prima con Google.');return;}
+  const v=viaggi.find(x=>x.id===eventId);
+  let start,end;
+  if(v&&!v.allDay&&v.time){ const [hh,mm]=v.time.split(':'); const eh=String(Math.min(parseInt(hh,10)+1,23)).padStart(2,'0'); start={dateTime:`${nd}T${v.time}:00`,timeZone:'Europe/Rome'}; end={dateTime:`${nd}T${eh}:${mm}:00`,timeZone:'Europe/Rome'}; }
+  else { start={date:nd}; end={date:nextDateStr(nd)}; }
+  try{ await apiPatchEvent(calId,eventId,{start,end}); loadDay(); }catch(e){ alert('Errore nello spostamento:\n'+e.message); }
+}
+
 // ── CARICA CALENDAR ──
 async function loadDay(){
   if(!accessToken){ document.getElementById('login-screen').style.display='flex'; return; }
@@ -785,11 +820,14 @@ function renderOttimiz(ottimiz){
     const testo = o.tipo==='ar'
       ? `Un mezzo può fare <b>${rotta(o.a)}</b> e al ritorno <b>${rotta(o.b)}</b> con un carico, invece di rientrare a vuoto.`
       : `Dopo <b>${rotta(o.a)}</b> si può proseguire con <b>${rotta(o.b)}</b> senza rientrare in sede in mezzo.`;
+    const uidA=(o.key+'-a').replace(/[^a-zA-Z0-9]/g,'_');
+    const uidB=(o.key+'-b').replace(/[^a-zA-Z0-9]/g,'_');
     return `<div class="ott-card">
       <div class="ott-title"><i class="ti ti-${o.tipo==='ar'?'arrows-exchange':'route'}"></i> ${o.tipo==='ar'?'Ritorno a vuoto evitabile':'Tratte da concatenare'} <span style="font-weight:400;color:var(--text-muted);font-size:11px">· ${cal}</span></div>
       <div class="ott-desc">${testo}</div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0"><span class="ott-pill">${rotta(o.a)} · ${merce(o.a)}</span><span class="ott-pill">${rotta(o.b)} · ${merce(o.b)}</span></div>
-      <button class="btn" style="padding:3px 10px;font-size:11px" onclick="gestisciOtt('${o.key}')"><i class="ti ti-check"></i> Segna come gestito</button>
+      ${azioniViaggioHtml(o.a,uidA)}
+      ${azioniViaggioHtml(o.b,uidB)}
+      <button class="btn" style="padding:3px 10px;font-size:11px;margin-top:10px" onclick="gestisciOtt('${o.key}')"><i class="ti ti-check"></i> Segna come gestito</button>
     </div>`;
   }).join('');
   if(haGestite) el.innerHTML+='<div style="margin-top:12px"><button class="btn" style="padding:3px 10px;font-size:11px" onclick="ripristinaOtt()"><i class="ti ti-rotate"></i> Ripristina le segnalazioni gestite</button></div>';

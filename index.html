@@ -490,7 +490,7 @@ function rilevaTipo(from,to,summary){
 }
 let tipoOverride=JSON.parse(localStorage.getItem('locom_tipo')||'{}');
 function tipoDe(v){ return tipoOverride[v.id]||v.tipo||'attivita'; }
-function setTipo(id,t){ if(t) tipoOverride[id]=t; else delete tipoOverride[id]; try{localStorage.setItem('locom_tipo',JSON.stringify(tipoOverride));}catch(e){} renderToday(); }
+function setTipo(id,t){ if(t) tipoOverride[id]=t; else delete tipoOverride[id]; try{localStorage.setItem('locom_tipo',JSON.stringify(tipoOverride));}catch(e){} renderToday(); const eid=id.replace(/[^a-zA-Z0-9]/g,'_'); document.getElementById('detail-'+eid)?.classList.add('open'); }
 
 function buildViaggio(ev, calId){
   const route=parseRoute(ev.summary||'');

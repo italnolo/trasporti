@@ -293,16 +293,34 @@ body{font-family:var(--font);background:var(--bg);color:var(--text-primary);min-
 
   <!-- NUOVO -->
   <div id="view-nuovo" style="display:none">
-    <div style="font-size:22px;font-weight:600;margin-bottom:4px">Inserisci viaggio</div>
-    <div style="font-size:12px;color:var(--text-muted);margin-bottom:20px">Il viaggio viene scritto sul calendario <b>Corriere</b> (corrierelocom).</div>
+    <div style="font-size:22px;font-weight:600;margin-bottom:4px">Inserisci evento</div>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:20px">Viaggio, trasferimento interno o attività — scritto sul calendario giusto.</div>
     <div class="form-section">
-      <div class="form-title">Nuovo spostamento</div>
-      <div class="form-grid">
-        <div class="form-group"><label>Partenza</label><select id="f-from"></select></div>
-        <div class="form-group"><label>Arrivo</label><select id="f-to"></select></div>
+      <div class="form-group">
+        <label>Categoria</label>
+        <select id="f-categoria" onchange="categoriaChange()">
+          <option value="viaggio">Viaggio (Corriere)</option>
+          <option value="interno">Trasferimento interno (sede)</option>
+          <option value="attivita">Attività / nota</option>
+        </select>
+      </div>
+      <div class="form-group" id="row-cal" style="display:none">
+        <label>Calendario di destinazione</label>
+        <select id="f-cal"></select>
+      </div>
+      <div id="row-rotta">
+        <div class="form-grid">
+          <div class="form-group"><label>Partenza</label><select id="f-from"></select></div>
+          <div class="form-group"><label>Arrivo</label><select id="f-to"></select></div>
+        </div>
+        <div class="form-group"><label>Merce / materiale</label><input type="text" id="f-merce" placeholder="es. Generatore 45KW, Idropulitrice..."></div>
+      </div>
+      <div class="form-group" id="row-attivita" style="display:none">
+        <label>Descrizione attività</label>
+        <input type="text" id="f-attivita" placeholder="es. Montaggio scala, Tagliando furgone, Assenza Luca...">
       </div>
       <div class="form-group">
-        <label>Tipo di viaggio</label>
+        <label>Tempi</label>
         <select id="f-tipo" onchange="tipoViaggioChange()">
           <option value="giorno">In giornata</option>
           <option value="finestra">Più giorni (finestra da…a)</option>
@@ -316,14 +334,13 @@ body{font-family:var(--font);background:var(--bg);color:var(--text-primary);min-
         <div class="form-group"><label>Dal giorno</label><input type="date" id="f-date-da"></div>
         <div class="form-group"><label>Al giorno (compreso)</label><input type="date" id="f-date-a"></div>
       </div>
-      <div class="form-group"><label>Merce / materiale</label><input type="text" id="f-merce" placeholder="es. Generatore 45KW, Idropulitrice..."></div>
       <div class="form-grid">
         <div class="form-group"><label>Mezzo / targa</label><select id="f-mezzo"></select></div>
-        <div class="form-group"><label>Autista</label><input type="text" id="f-autista" placeholder="es. Andrea, Remo..."></div>
+        <div class="form-group"><label>Autista / persona</label><input type="text" id="f-autista" placeholder="es. Andrea, Remo..."></div>
       </div>
       <div class="form-group"><label>Note</label><input type="text" id="f-note" placeholder="Istruzioni, destinatario..."></div>
       <div class="btn-row" style="margin-top:16px">
-        <button class="btn primary" onclick="autorizzaViaggio()"><i class="ti ti-calendar-plus"></i> Inserisci nel calendario Corriere</button>
+        <button class="btn primary" onclick="autorizzaViaggio()"><i class="ti ti-calendar-plus"></i> Inserisci</button>
         <button class="btn" onclick="showView('oggi')">Annulla</button>
       </div>
     </div>
@@ -793,7 +810,18 @@ function populateNuovoForm(){
   document.getElementById('f-date-da').value=oggi;
   document.getElementById('f-date-a').value=oggi;
   document.getElementById('f-tipo').value='giorno';
+  document.getElementById('f-cal').innerHTML=CAL_IDS.map(id=>`<option value="${id}">${calMeta(id).label}</option>`).join('');
+  const catSel=document.getElementById('f-categoria'); if(catSel) catSel.value='viaggio';
   tipoViaggioChange();
+  categoriaChange();
+}
+function categoriaChange(){
+  const c=document.getElementById('f-categoria').value;
+  document.getElementById('row-cal').style.display = (c==='viaggio')?'none':'';
+  document.getElementById('row-rotta').style.display = (c==='attivita')?'none':'';
+  document.getElementById('row-attivita').style.display = (c==='attivita')?'':'none';
+  // per un trasferimento interno proponi Sarzana come calendario di default
+  if(c==='interno'){ const cal=document.getElementById('f-cal'); if(cal && cal.value===CORRIERE_CAL) cal.value='italnolosarzana@gmail.com'; }
 }
 function tipoViaggioChange(){
   const t=document.getElementById('f-tipo').value;
@@ -844,13 +872,25 @@ async function spostaCollo(eventId,eid){
 
 async function autorizzaViaggio(){
   if(!accessToken){alert('Accedi prima con Google.');return;}
-  const from=document.getElementById('f-from').value;
-  const to=document.getElementById('f-to').value;
-  const merce=document.getElementById('f-merce').value.trim();
+  const cat=document.getElementById('f-categoria').value;
   const mezzo=document.getElementById('f-mezzo').value;
   const autista=document.getElementById('f-autista').value.trim();
   const note=document.getElementById('f-note').value.trim();
-  if(!from||!to||!merce){alert('Compila partenza, arrivo e merce.');return;}
+
+  let calId, summary, calNome;
+  if(cat==='attivita'){
+    const att=document.getElementById('f-attivita').value.trim();
+    if(!att){alert('Scrivi la descrizione dell\'attività.');return;}
+    calId=document.getElementById('f-cal').value; summary=att;
+  }else{
+    const from=document.getElementById('f-from').value;
+    const to=document.getElementById('f-to').value;
+    const merce=document.getElementById('f-merce').value.trim();
+    if(!from||!to||!merce){alert('Compila partenza, arrivo e merce.');return;}
+    summary=`${from}-${to} ${merce}`;
+    calId=(cat==='viaggio')?CORRIERE_CAL:document.getElementById('f-cal').value;
+  }
+  calNome=calMeta(calId).label;
 
   const tipo=document.getElementById('f-tipo').value;
   let start,end;
@@ -859,7 +899,7 @@ async function autorizzaViaggio(){
     const a=document.getElementById('f-date-a').value;
     if(!da||!a){alert('Indica il giorno iniziale e finale della finestra.');return;}
     if(a<da){alert('Il giorno finale è prima di quello iniziale.');return;}
-    start={date:da}; end={date:nextDateStr(a)};   // end esclusiva: comprende il giorno "a"
+    start={date:da}; end={date:nextDateStr(a)};
   }else{
     const dateStr=document.getElementById('f-date').value||isoDate(getTargetDate());
     const time=document.getElementById('f-time').value;
@@ -872,17 +912,15 @@ async function autorizzaViaggio(){
     }
   }
   const desc=[]; if(mezzo)desc.push('Mezzo: '+mezzo); if(autista)desc.push('Autista: '+autista); if(note)desc.push(note);
-  const body={summary:`${from}-${to} ${merce}`,description:desc.join('\n'),start,end};
+  const body={summary,description:desc.join('\n'),start,end};
 
   try{
-    await apiCreateEvent(CORRIERE_CAL, body);
+    await apiCreateEvent(calId, body);
     if(mezzo){const m=automezzi.find(x=>x.targa===mezzo);if(m){m.disp=false;saveAutomezzi();}}
-    document.getElementById('f-merce').value='';
-    document.getElementById('f-autista').value='';
-    document.getElementById('f-note').value='';
+    ['f-merce','f-attivita','f-autista','f-note'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
     showView('oggi');
-    loadDay();  // ricarica dal calendario reale così vedi il viaggio appena scritto
-  }catch(e){ alert('Errore nello scrivere sul calendario Corriere:\n'+e.message); }
+    loadDay();
+  }catch(e){ alert('Errore nello scrivere sul calendario '+calNome+':\n'+e.message+'\n(Potresti non avere il permesso di scrittura su questo calendario.)'); }
 }
 
 async function eliminaViaggio(eventId,eid){
@@ -994,7 +1032,46 @@ function pianificaGiro(base, items, startOnboard){
   return {seq,totKm,totMin,restano};
 }
 
-function statoCollo(id){ const d=corriereStato[corrDayKey(0)]; return (d&&d[id])||'giro'; }
+// Giro FISSO: segue esattamente la sequenza di sedi data (ripetizioni ammesse).
+// Un collo viene caricato alla prima tappa uguale alla sua partenza e scaricato
+// alla prima tappa uguale alla destinazione che viene DOPO il carico.
+function pianificaGiroFisso(seqCodes, items, startOnboard){
+  startOnboard=startOnboard||[];
+  const stops=seqCodes.map(code=>({code,carica:[],scarica:[],onboardAfter:[],km:0,min:0}));
+  const fuori=[];
+  const loadAt={}, unloadAt={}, preUnloadAt={};
+  // carichi già a bordo da ieri: scaricati alla prima occorrenza della destinazione
+  startOnboard.forEach(it=>{
+    if(it.deliver){ const di=seqCodes.findIndex(c=>c===it.to); if(di>=0)(preUnloadAt[di]=preUnloadAt[di]||[]).push(it); }
+  });
+  // colli odierni
+  items.forEach(it=>{
+    const li=seqCodes.findIndex(c=>c===it.from);
+    if(li<0){ fuori.push(it); return; }
+    if(it.deliver){
+      let di=-1; for(let j=li+1;j<seqCodes.length;j++){ if(seqCodes[j]===it.to){di=j;break;} }
+      if(di<0){ fuori.push(it); return; }
+      (loadAt[li]=loadAt[li]||[]).push(it); (unloadAt[di]=unloadAt[di]||[]).push(it);
+    }else{
+      (loadAt[li]=loadAt[li]||[]).push(it); // tieni a bordo: caricato, mai scaricato
+    }
+  });
+  let onboard=startOnboard.slice(), totKm=0, totMin=0;
+  for(let i=0;i<seqCodes.length;i++){
+    if(i>0){ const t=tratta(seqCodes[i-1],seqCodes[i]); stops[i].km=t.km; stops[i].min=t.min; totKm+=t.km; totMin+=t.min; }
+    const sc=[...(preUnloadAt[i]||[]),...(unloadAt[i]||[])];
+    sc.forEach(it=>{ onboard=onboard.filter(x=>x.id!==it.id); });
+    stops[i].scarica=sc;
+    if(i===0) stops[i].preloaded=startOnboard.slice();
+    const ca=(loadAt[i]||[]);
+    ca.forEach(it=>onboard.push(it));
+    stops[i].carica=ca;
+    stops[i].onboardAfter=onboard.slice();
+  }
+  if(stops.length){ stops[0].start=true; stops[stops.length-1].rientro=true; }
+  return {seq:stops, totKm, totMin, restano:onboard.slice(), fuori};
+}
+
 function pickupCollo(id){ const d=corrierePickup[corrDayKey(0)]; return d&&d[id]; }
 function setColloStato(id,s){ const k=corrDayKey(0); (corriereStato[k]=corriereStato[k]||{})[id]=s; renderCorriere(); }
 function setColloPickup(id,s){ const k=corrDayKey(0); corrierePickup[k]=corrierePickup[k]||{}; if(s) corrierePickup[k][id]=s; else delete corrierePickup[k][id]; renderCorriere(); }
@@ -1055,6 +1132,15 @@ function tutteSediScelte(){ const m=sediMap(); return Object.keys(SEDI).every(c=
 function toggleSede(code){ const m=sediMap(); m[code]=!m[code]; renderCorriere(); }
 function resetSedi(){ const m=sediMap(); Object.keys(SEDI).forEach(c=>m[c]=true); renderCorriere(); }
 
+// Modalità del giro: 'auto' (ottimizzato) oppure 'fisso' (ordine deciso da Franco).
+let corriereModo={}, corriereGiroFisso={};
+function modoGiro(){ return corriereModo[corrDayKey(0)]||'auto'; }
+function setModo(mo){ corriereModo[corrDayKey(0)]=mo; renderCorriere(); }
+function giroSeq(){ return corriereGiroFisso[corrDayKey(0)]||[]; }
+function addTappa(code){ const k=corrDayKey(0); (corriereGiroFisso[k]=corriereGiroFisso[k]||[]).push(code); renderCorriere(); }
+function removeTappa(i){ const s=giroSeq(); s.splice(i,1); renderCorriere(); }
+function svuotaGiro(){ corriereGiroFisso[corrDayKey(0)]=[]; renderCorriere(); }
+
 function renderCorriere(){
   const host=document.getElementById('view-corriere');
   const bsel=host.querySelector('#corr-base');
@@ -1088,24 +1174,38 @@ function renderCorriere(){
     return {id:it.id, from:it.from, fromOrig:it.from, to:it.to, label:it.label, stato, deliver:(stato==='giro'), carried:true};
   });
   const inGiroTodayAll=colli.filter(c=>c.stato!=='tolto');
-  // Se Franco ha scelto solo alcune sedi: un collo entra nel giro solo se sia il
-  // carico che lo scarico sono tra le sedi toccate (la base è sempre inclusa).
-  const inGiroToday=inGiroTodayAll.filter(c=>allowedSede(c.from)&&allowedSede(c.to));
-  const restaFuori=inGiroTodayAll.filter(c=>!(allowedSede(c.from)&&allowedSede(c.to)));
-  const inGiroCarried=colliCarried.filter(c=>c.stato!=='tolto').map(c=>({
-    ...c, deliver: c.deliver && allowedSede(c.to)   // se la destinazione non è toccata, resta a bordo
-  }));
-  const plan=pianificaGiro(
-    corriereBase,
-    inGiroToday.map(c=>({id:c.id,from:c.from,to:c.to,label:c.label,deliver:c.deliver})),
-    inGiroCarried.map(c=>({id:c.id,from:c.from,to:c.to,label:c.label,deliver:c.deliver}))
-  );
+  const carriedActive=colliCarried.filter(c=>c.stato!=='tolto');
+  const seqFissa=giroSeq();
+  const usaFisso=(modoGiro()==='fisso' && seqFissa.length>0);
+
+  let plan, restaFuori;
+  if(usaFisso){
+    // Segue l'ordine dato da Franco (doppi passaggi ammessi).
+    plan=pianificaGiroFisso(
+      seqFissa,
+      inGiroTodayAll.map(c=>({id:c.id,from:c.from,to:c.to,label:c.label,deliver:c.deliver})),
+      carriedActive.map(c=>({id:c.id,from:c.from,to:c.to,label:c.label,deliver:c.deliver}))
+    );
+    const fuoriIds=new Set(plan.fuori.map(x=>x.id));
+    restaFuori=inGiroTodayAll.filter(c=>fuoriIds.has(c.id));
+  }else{
+    // Automatico: un collo entra solo se carico e scarico sono tra le sedi toccate (base sempre inclusa).
+    const inGiroToday=inGiroTodayAll.filter(c=>allowedSede(c.from)&&allowedSede(c.to));
+    restaFuori=inGiroTodayAll.filter(c=>!(allowedSede(c.from)&&allowedSede(c.to)));
+    const inGiroCarried=carriedActive.map(c=>({...c, deliver: c.deliver && allowedSede(c.to)}));
+    plan=pianificaGiro(
+      corriereBase,
+      inGiroToday.map(c=>({id:c.id,from:c.from,to:c.to,label:c.label,deliver:c.deliver})),
+      inGiroCarried.map(c=>({id:c.id,from:c.from,to:c.to,label:c.label,deliver:c.deliver}))
+    );
+  }
+  const fuoriSet=new Set(restaFuori.map(c=>c.id));
   // ciò che resta a bordo va nel giro di DOMANI
   corriereCarry[corrDayKey(1)]=plan.restano.map(x=>({id:x.id,from:x.from,to:x.to,label:x.label}));
   try{localStorage.setItem('locom_corriere_carry',JSON.stringify(corriereCarry));}catch(e){}
-  const nColli=inGiroToday.length+inGiroCarried.length;
+  const nColli=(inGiroTodayAll.length-restaFuori.length)+carriedActive.length;
   const nFermate=plan.seq.filter(s=>!s.start&&!s.rientro).length;
-  corriereLastPlan=plan; corriereLastMeta={data:corrDayKey(0),base:corriereBase,nColli,nFermate,sediTxt:(tutteSediScelte()?'tutte':Object.keys(SEDI).filter(c=>allowedSede(c)).map(c=>SEDI[c].label).join(', '))};
+  corriereLastPlan=plan; corriereLastMeta={data:corrDayKey(0),base:corriereBase,nColli,nFermate,sediTxt:(usaFisso?('ordine fisso: '+seqFissa.map(c=>SEDI[c]?.label||c).join(' → ')):(tutteSediScelte()?'tutte':Object.keys(SEDI).filter(c=>allowedSede(c)).map(c=>SEDI[c].label).join(', ')))};
   corriereLastFuori=restaFuori.map(c=>({from:c.from,to:c.to,label:c.label}));
 
   let html=`
@@ -1115,18 +1215,38 @@ function renderCorriere(){
       <div class="kpi-card c-green"><div class="kpi-label">Colli / fermate</div><div class="kpi-val">${nColli}<span style="font-size:14px"> / ${nFermate}</span></div><div class="kpi-sub">nel giro</div></div>
     </div>`;
 
-  // Barra: sedi che Franco vuole toccare oggi
-  html+='<div class="card" style="margin-top:12px"><div class="card-header"><span class="card-title">Sedi da toccare</span>'+
-    (tutteSediScelte()?'<span style="font-size:11px;color:var(--text-muted)">tutte · giro completo</span>':'<button class="btn" style="padding:2px 10px;font-size:11px" onclick="resetSedi()"><i class="ti ti-rotate"></i> Tutte le sedi</button>')+
-    '</div><div style="display:flex;flex-wrap:wrap;gap:6px;padding-top:4px">';
-  Object.keys(SEDI).forEach(code=>{
-    const isBase=(code===corriereBase);
-    const on=isBase?true:sedeScelta(code);
-    html+=`<button class="btn ${on?'primary':''}" style="padding:4px 12px;font-size:12px;${isBase?'opacity:.6;cursor:default':''}" ${isBase?'':`onclick="toggleSede('${code}')"`}>${SEDI[code].label}${isBase?' (base)':''}</button>`;
-  });
-  html+='</div>'+(tutteSediScelte()?'':'<div style="font-size:11px;color:var(--text-muted);margin-top:8px">Giro limitato alle sedi selezionate. Ciò che non ci sta è elencato sotto in “Restano fuori”.</div>')+'</div>';
+  // Impostazione giro: automatico oppure ordine fisso deciso da Franco
+  const modo=modoGiro();
+  html+='<div class="card" style="margin-top:12px"><div class="card-header"><span class="card-title">Impostazione giro</span>'+
+    `<div style="display:flex;gap:4px"><button class="btn ${modo==='auto'?'primary':''}" style="padding:3px 10px;font-size:11px" onclick="setModo('auto')">Automatico</button><button class="btn ${modo==='fisso'?'primary':''}" style="padding:3px 10px;font-size:11px" onclick="setModo('fisso')">Ordine fisso</button></div>`+
+    '</div>';
+  if(modo==='auto'){
+    html+='<div style="font-size:12px;color:var(--text-secondary);margin:6px 0 8px">Sedi da toccare '+(tutteSediScelte()?'<span style="color:var(--text-muted)">(tutte · giro completo)</span>':'<button class="btn" style="padding:1px 9px;font-size:11px" onclick="resetSedi()"><i class="ti ti-rotate"></i> Tutte</button>')+'</div><div style="display:flex;flex-wrap:wrap;gap:6px">';
+    Object.keys(SEDI).forEach(code=>{
+      const isBase=(code===corriereBase); const on=isBase?true:sedeScelta(code);
+      html+=`<button class="btn ${on?'primary':''}" style="padding:4px 12px;font-size:12px;${isBase?'opacity:.6;cursor:default':''}" ${isBase?'':`onclick="toggleSede('${code}')"`}>${SEDI[code].label}${isBase?' (base)':''}</button>`;
+    });
+    html+='</div>';
+  }else{
+    const seq=giroSeq();
+    html+='<div style="font-size:12px;color:var(--text-secondary);margin:6px 0 6px">Aggiungi tappa (anche più volte la stessa sede):</div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">';
+    Object.keys(SEDI).forEach(code=>{ html+=`<button class="btn" style="padding:4px 12px;font-size:12px" onclick="addTappa('${code}')">+ ${SEDI[code].label}</button>`; });
+    html+='</div>';
+    if(seq.length){
+      html+='<div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px">Ordine del giro <button class="btn" style="padding:1px 9px;font-size:11px;margin-left:6px" onclick="svuotaGiro()"><i class="ti ti-trash"></i> Svuota</button></div><div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">';
+      seq.forEach((code,i)=>{
+        html+=`<span class="tag" style="background:var(--accent-light);color:var(--accent);font-size:12px;padding:5px 10px">${i+1}. ${SEDI[code]?.label||code} <span style="cursor:pointer;font-weight:700" onclick="removeTappa(${i})">✕</span></span>`;
+        if(i<seq.length-1) html+='<i class="ti ti-arrow-right" style="color:#c8cdd6"></i>';
+      });
+      html+='</div>';
+    }else{
+      html+='<div style="font-size:12px;color:var(--text-muted)">Nessuna tappa: aggiungi le sedi nell\'ordine in cui vuoi passarci.</div>';
+    }
+  }
+  html+='</div>';
 
-  html+='<div class="card" style="margin-top:4px"><div class="card-header"><span class="card-title">Percorso ottimizzato — cosa carica e cosa scarica</span></div>';
+
+  html+=`<div class="card" style="margin-top:4px"><div class="card-header"><span class="card-title">${usaFisso?'Percorso fisso (ordine scelto)':'Percorso ottimizzato'} — cosa carica e cosa scarica</span></div>`;
   plan.seq.forEach((s,i)=>{
     const meta=SEDI[s.code]||{label:s.code,color:'#888'};
     const tag = s.start?'<span class="tag" style="background:var(--surface-2);color:var(--text-secondary)">partenza</span>'
@@ -1149,7 +1269,7 @@ function renderCorriere(){
   html+='<div class="card" style="margin-top:12px"><div class="card-header"><span class="card-title">Mappa del giro</span><span style="font-size:11px;color:var(--text-muted)">tracciato indicativo · OpenStreetMap</span></div><div id="corr-map" style="height:340px;width:100%"></div></div>';
 
   html+='<div class="card" style="margin-top:12px"><div class="card-header"><span class="card-title">Carichi del Corriere — modifica il giro</span></div>';
-  colliCarried.concat(colli.filter(c=>allowedSede(c.from)&&allowedSede(c.to))).forEach(c=>{
+  colliCarried.concat(colli.filter(c=>!fuoriSet.has(c.id))).forEach(c=>{
     const eid=c.id.replace(/[^a-zA-Z0-9]/g,'_');
     const pickOpts=Object.keys(SEDI).map(code=>`<option value="${code}" ${code===c.from?'selected':''}>${SEDI[code].label}</option>`).join('');
     const sostituita=(c.from!==c.fromOrig);

@@ -473,14 +473,19 @@ function parseMerce(summary){return (summary||'').replace(/^[A-Z]{2}[\s\-–>→
 // Tipologie di evento: divide i viaggi dalle altre attività (assenze, tagliandi, montaggi…).
 const TIPI={
   viaggio:     {label:'Viaggio',              color:'#1a56db', icon:'ti-truck'},
+  interno:     {label:'Trasferimento interno',color:'#0e7490', icon:'ti-arrows-exchange'},
   attivita:    {label:'Attività',             color:'#7c3aed', icon:'ti-tool'},
   manutenzione:{label:'Manutenzione',         color:'#b45309', icon:'ti-settings'},
   montaggio:   {label:'Montaggio/assistenza', color:'#0a7d4b', icon:'ti-tools'},
   assenza:     {label:'Assenza',              color:'#b42318', icon:'ti-user-off'},
   nocorriere:  {label:'No corriere',          color:'#5b6472', icon:'ti-ban'},
 };
-function rilevaTipo(from,to,summary){
-  if(from!=='??' && to!=='??' && from!==to) return 'viaggio';
+function rilevaTipo(from,to,summary,calId){
+  if(from!=='??' && to!=='??' && from!==to){
+    // I movimenti sede→sede dei calendari Sarzana/Pisa sono trasferimenti interni delle loro flotte.
+    if(calId==='italnolosarzana@gmail.com' || calId==='italnolopisa@gmail.com') return 'interno';
+    return 'viaggio';
+  }
   const s=(summary||'').toLowerCase();
   if(/no\s*corriere|niente corriere|corriere\s*no/.test(s)) return 'nocorriere';
   if(/assen|ferie|permess|malatt|riposo|libero/.test(s)) return 'assenza';
@@ -521,7 +526,7 @@ function buildViaggio(ev, calId){
     note:desc,status:targaM?.[1]?'autorizzato':'pending',
     calId:calId||'',start:ev.start?.dateTime||ev.start?.date||'',
     finestra,giorniFinestra,startDate:sDate,endDate:eDate,scadenza:scad,
-    tipo:rilevaTipo(route?.from||'??',route?.to||'??',ev.summary||''),
+    tipo:rilevaTipo(route?.from||'??',route?.to||'??',ev.summary||'',calId),
   };
 }
 // Estrae una data gg/mm o gg/mm/aa da un testo e la ritorna come ISO (YYYY-MM-DD), o ''.
@@ -997,13 +1002,14 @@ function setCorriereBase(v){ corriereBase=v; renderCorriere(); }
 
 // Spostamenti flessibili: inclusi nel giro solo se Franco lo decide, per singolo giorno.
 let corriereFlex={};
-let corriereLastPlan=null, corriereLastMeta=null;
+let corriereLastPlan=null, corriereLastMeta=null, corriereLastFuori=[];
 function stampaPiano(){
   if(!corriereLastPlan){alert('Apri il Giro Corriere e carica una giornata prima di stampare.');return;}
   const p=corriereLastPlan, m=corriereLastMeta;
   const [y,mo,d]=m.data.split('-'); const dataFmt=`${d}/${mo}/${y}`;
   let h=`<div class="pt-title">Piano viaggi Corriere — Franco</div>
     <div class="pt-sub">Giornata ${dataFmt} · base ${SEDI[m.base]?.label||m.base} · ${p.totKm} km stimati · ${fmtMin(p.totMin)} di guida · ${m.nColli} colli</div>
+    ${m.sediTxt&&m.sediTxt!=='tutte'?`<div class="pt-sub" style="margin-top:-6px">Tappe scelte: ${m.sediTxt}</div>`:''}
     <table class="pt"><thead><tr><th>#</th><th>Sede</th><th>Scarica</th><th>Carica</th><th>A bordo dopo</th><th>km</th></tr></thead><tbody>`;
   p.seq.forEach((s,i)=>{
     const nome=SEDI[s.code]?.label||s.code;
@@ -1015,6 +1021,12 @@ function stampaPiano(){
   });
   h+='</tbody></table>';
   if(p.restano&&p.restano.length) h+=`<div class="pt-note">Resta a bordo per il giorno dopo: ${p.restano.map(x=>x.label+' → '+(SEDI[x.to]?.label||x.to)).join(', ')}</div>`;
+  if(corriereLastFuori&&corriereLastFuori.length){
+    h+=`<div class="pt-note" style="margin-top:14px">Restano fuori (da spostare ad altro giorno):</div>
+      <table class="pt"><thead><tr><th>Da</th><th>A</th><th>Materiale</th></tr></thead><tbody>`;
+    corriereLastFuori.forEach(c=>{ h+=`<tr><td>${SEDI[c.from]?.label||c.from}</td><td>${SEDI[c.to]?.label||c.to}</td><td>${c.label}</td></tr>`; });
+    h+='</tbody></table>';
+  }
   h+=`<div class="pt-foot">Lo.Com — foglio di viaggio Corriere · distanze stimate</div>`;
   document.getElementById('print-area').innerHTML=h;
   window.print();
@@ -1033,6 +1045,15 @@ function giorniAllaScadenza(iso){
   return Math.round((Date.parse(iso)-Date.parse(oggi))/86400000);
 }
 function fmtData(iso){ if(!iso) return ''; const [y,m,d]=iso.split('-'); return `${d}/${m}`; }
+
+// Sedi scelte da Franco per la giornata (se non tutte, il giro tocca solo quelle).
+let corriereSedi={};
+function sediMap(){ const k=corrDayKey(0); if(!corriereSedi[k]){corriereSedi[k]={};Object.keys(SEDI).forEach(c=>corriereSedi[k][c]=true);} return corriereSedi[k]; }
+function sedeScelta(code){ return sediMap()[code]!==false; }
+function allowedSede(code){ return code===corriereBase || sedeScelta(code); }
+function tutteSediScelte(){ const m=sediMap(); return Object.keys(SEDI).every(c=>m[c]); }
+function toggleSede(code){ const m=sediMap(); m[code]=!m[code]; renderCorriere(); }
+function resetSedi(){ const m=sediMap(); Object.keys(SEDI).forEach(c=>m[c]=true); renderCorriere(); }
 
 function renderCorriere(){
   const host=document.getElementById('view-corriere');
@@ -1066,8 +1087,14 @@ function renderCorriere(){
     const stato=statoCollo(it.id);
     return {id:it.id, from:it.from, fromOrig:it.from, to:it.to, label:it.label, stato, deliver:(stato==='giro'), carried:true};
   });
-  const inGiroToday=colli.filter(c=>c.stato!=='tolto');
-  const inGiroCarried=colliCarried.filter(c=>c.stato!=='tolto');
+  const inGiroTodayAll=colli.filter(c=>c.stato!=='tolto');
+  // Se Franco ha scelto solo alcune sedi: un collo entra nel giro solo se sia il
+  // carico che lo scarico sono tra le sedi toccate (la base è sempre inclusa).
+  const inGiroToday=inGiroTodayAll.filter(c=>allowedSede(c.from)&&allowedSede(c.to));
+  const restaFuori=inGiroTodayAll.filter(c=>!(allowedSede(c.from)&&allowedSede(c.to)));
+  const inGiroCarried=colliCarried.filter(c=>c.stato!=='tolto').map(c=>({
+    ...c, deliver: c.deliver && allowedSede(c.to)   // se la destinazione non è toccata, resta a bordo
+  }));
   const plan=pianificaGiro(
     corriereBase,
     inGiroToday.map(c=>({id:c.id,from:c.from,to:c.to,label:c.label,deliver:c.deliver})),
@@ -1078,7 +1105,8 @@ function renderCorriere(){
   try{localStorage.setItem('locom_corriere_carry',JSON.stringify(corriereCarry));}catch(e){}
   const nColli=inGiroToday.length+inGiroCarried.length;
   const nFermate=plan.seq.filter(s=>!s.start&&!s.rientro).length;
-  corriereLastPlan=plan; corriereLastMeta={data:corrDayKey(0),base:corriereBase,nColli,nFermate};
+  corriereLastPlan=plan; corriereLastMeta={data:corrDayKey(0),base:corriereBase,nColli,nFermate,sediTxt:(tutteSediScelte()?'tutte':Object.keys(SEDI).filter(c=>allowedSede(c)).map(c=>SEDI[c].label).join(', '))};
+  corriereLastFuori=restaFuori.map(c=>({from:c.from,to:c.to,label:c.label}));
 
   let html=`
     <div class="kpi-row" style="grid-template-columns:repeat(3,1fr)">
@@ -1086,6 +1114,17 @@ function renderCorriere(){
       <div class="kpi-card"><div class="kpi-label">Tempo di guida</div><div class="kpi-val">${fmtMin(plan.totMin)}</div><div class="kpi-sub">soste carico escluse</div></div>
       <div class="kpi-card c-green"><div class="kpi-label">Colli / fermate</div><div class="kpi-val">${nColli}<span style="font-size:14px"> / ${nFermate}</span></div><div class="kpi-sub">nel giro</div></div>
     </div>`;
+
+  // Barra: sedi che Franco vuole toccare oggi
+  html+='<div class="card" style="margin-top:12px"><div class="card-header"><span class="card-title">Sedi da toccare</span>'+
+    (tutteSediScelte()?'<span style="font-size:11px;color:var(--text-muted)">tutte · giro completo</span>':'<button class="btn" style="padding:2px 10px;font-size:11px" onclick="resetSedi()"><i class="ti ti-rotate"></i> Tutte le sedi</button>')+
+    '</div><div style="display:flex;flex-wrap:wrap;gap:6px;padding-top:4px">';
+  Object.keys(SEDI).forEach(code=>{
+    const isBase=(code===corriereBase);
+    const on=isBase?true:sedeScelta(code);
+    html+=`<button class="btn ${on?'primary':''}" style="padding:4px 12px;font-size:12px;${isBase?'opacity:.6;cursor:default':''}" ${isBase?'':`onclick="toggleSede('${code}')"`}>${SEDI[code].label}${isBase?' (base)':''}</button>`;
+  });
+  html+='</div>'+(tutteSediScelte()?'':'<div style="font-size:11px;color:var(--text-muted);margin-top:8px">Giro limitato alle sedi selezionate. Ciò che non ci sta è elencato sotto in “Restano fuori”.</div>')+'</div>';
 
   html+='<div class="card" style="margin-top:4px"><div class="card-header"><span class="card-title">Percorso ottimizzato — cosa carica e cosa scarica</span></div>';
   plan.seq.forEach((s,i)=>{
@@ -1110,7 +1149,7 @@ function renderCorriere(){
   html+='<div class="card" style="margin-top:12px"><div class="card-header"><span class="card-title">Mappa del giro</span><span style="font-size:11px;color:var(--text-muted)">tracciato indicativo · OpenStreetMap</span></div><div id="corr-map" style="height:340px;width:100%"></div></div>';
 
   html+='<div class="card" style="margin-top:12px"><div class="card-header"><span class="card-title">Carichi del Corriere — modifica il giro</span></div>';
-  colliCarried.concat(colli).forEach(c=>{
+  colliCarried.concat(colli.filter(c=>allowedSede(c.from)&&allowedSede(c.to))).forEach(c=>{
     const eid=c.id.replace(/[^a-zA-Z0-9]/g,'_');
     const pickOpts=Object.keys(SEDI).map(code=>`<option value="${code}" ${code===c.from?'selected':''}>${SEDI[code].label}</option>`).join('');
     const sostituita=(c.from!==c.fromOrig);
@@ -1141,6 +1180,26 @@ function renderCorriere(){
     </div>`;
   });
   html+='</div>';
+
+  // ── Restano fuori (sedi non toccate oggi) ──
+  if(restaFuori.length){
+    html+='<div class="card" style="margin-top:12px"><div class="card-header"><span class="card-title">Restano fuori</span><span style="font-size:11px;color:var(--text-muted)">sedi non toccate oggi</span></div>';
+    restaFuori.forEach(c=>{
+      const eid=c.id.replace(/[^a-zA-Z0-9]/g,'_');
+      html+=`<div class="viaggio" style="cursor:default">
+        <div class="v-top" style="flex-wrap:wrap;gap:8px">
+          <span class="v-route" style="flex:1 1 200px">${SEDI[c.from]?.label||c.from} <i class="ti ti-arrow-right" style="font-size:12px;color:#c8cdd6"></i> ${SEDI[c.to]?.label||c.to} — ${c.label}</span>
+          <button class="btn" style="padding:3px 9px;font-size:11px" onclick="document.getElementById('mv-${eid}').style.display='flex'"><i class="ti ti-calendar-event"></i> Sposta a domani / altra data</button>
+        </div>
+        <div id="mv-${eid}" style="display:none;gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap">
+          <span style="font-size:12px;color:var(--text-secondary)">Sposta a</span>
+          <input type="date" id="mvd-${eid}" style="font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid var(--border)">
+          <button class="btn primary" style="padding:3px 10px;font-size:11px" onclick="spostaCollo('${c.id}','${eid}')">Conferma</button>
+        </div>
+      </div>`;
+    });
+    html+='</div>';
+  }
 
   // ── Spostamenti flessibili (note multi-giorno) ──
   if(rawFlex.length){

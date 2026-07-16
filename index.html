@@ -664,6 +664,9 @@ async function loadDay(){
   }
   btn.disabled=false; btn.innerHTML='<i class="ti ti-refresh"></i> Aggiorna';
   renderToday();
+  // Se l'utente sta guardando il Giro Corriere, aggiorno anche quello
+  const vc=document.getElementById('view-corriere');
+  if(vc && vc.style.display!=='none') renderCorriere();
 }
 
 function setSyncPill(state,text){
@@ -738,12 +741,14 @@ function renderViaggioCard(v,ottimiz){
           ${Object.keys(TIPI).map(k=>`<option value="${k}" ${k===tp?'selected':''}>${TIPI[k].label}</option>`).join('')}
         </select>
       </div>`;
+  const misuraBtn=(hasRoute&&v.from!==v.to)?`<button class="btn ${inMisura(v.id)?'primary':''}" data-gm="${eid}" style="padding:2px 8px;font-size:11px" onclick="event.stopPropagation();toggleGiroMisura('${v.id}')">${inMisura(v.id)?'✓ Nel giro':'+ Nel giro'}</button>`:'';
   return `<div class="${cls}" id="vc-${eid}" onclick="toggleDetail('${eid}')">
     <div class="v-top">
       <span class="v-time">${timeLabel}</span>
       ${routeHtml}
       ${tagHtml}
       ${tipoBadge}
+      ${misuraBtn}
       ${v.finestra?`<span class="tag" style="background:var(--surface-2);color:var(--text-secondary)"><i class="ti ti-calendar-time" style="font-size:10px"></i> finestra ${v.giorniFinestra}gg</span>`:''}
     </div>
     ${hasRoute?`<div class="v-merce">${v.merce||v.summary}</div>`:''}
@@ -917,6 +922,16 @@ async function apiPatchEvent(calId,eventId,body){
   return r.json();
 }
 // Sposta un viaggio del Corriere a un'altra data (lo riscrive sul calendario).
+async function rimandaADomani(eventId){
+  if(!accessToken){alert('Accedi prima con Google.');return;}
+  const nd=corrDayKey(1);
+  const v=viaggi.find(x=>x.id===eventId);
+  let start,end;
+  if(v && !v.allDay && v.time){ const [hh,mm]=v.time.split(':'); const eh=String(Math.min(parseInt(hh,10)+1,23)).padStart(2,'0'); start={dateTime:`${nd}T${v.time}:00`,timeZone:'Europe/Rome'}; end={dateTime:`${nd}T${eh}:${mm}:00`,timeZone:'Europe/Rome'}; }
+  else { start={date:nd}; end={date:nextDateStr(nd)}; }
+  try{ await apiPatchEvent(CORRIERE_CAL, eventId, {start,end}); loadDay(); }
+  catch(e){ alert('Errore nello spostamento a domani:\n'+e.message); }
+}
 async function spostaCollo(eventId,eid){
   const nd=document.getElementById('mvd-'+eid)?.value;
   if(!nd){alert('Scegli la nuova data.');return;}
@@ -1161,6 +1176,20 @@ function togglePrenotato(id,testo){
 
 // Spostamenti flessibili: inclusi nel giro solo se Franco lo decide, per singolo giorno.
 let corriereFlex={};
+function urgenzaCardHtml(){
+  const sedeOpts=Object.keys(SEDI).map(c=>`<option value="${c}">${SEDI[c].label}</option>`).join('');
+  return `<div class="card" style="margin-top:12px"><div class="card-header"><span class="card-title"><i class="ti ti-broadcast"></i> Urgenza dalla radio — ci sta nel giro?</span></div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px">
+      <select id="urg-from" style="font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid var(--border);background:var(--surface)"><option value="">Da…</option>${sedeOpts}</select>
+      <i class="ti ti-arrow-right" style="color:#c8cdd6"></i>
+      <select id="urg-to" style="font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid var(--border);background:var(--surface)"><option value="">A…</option>${sedeOpts}</select>
+      <input type="text" id="urg-desc" placeholder="cosa serve (es. generatore x cliente)" style="flex:1 1 160px;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid var(--border)">
+      <button class="btn primary" style="padding:4px 12px;font-size:12px" onclick="valutaUrgenza()">Valuta</button>
+    </div>
+    <div id="urg-result" style="margin-top:10px"></div>
+  </div>`;
+}
+
 let corriereLastPlan=null, corriereLastMeta=null, corriereLastFuori=[], corriereLastCtx=null;
 
 // ── Urgenze (radioline): Franco valuta l'impatto sul giro PRIMA di decidere.
@@ -1268,6 +1297,19 @@ function giroSeq(){ return corriereGiroFisso[corrDayKey(0)]||[]; }
 function addTappa(code){ const k=corrDayKey(0); (corriereGiroFisso[k]=corriereGiroFisso[k]||[]).push(code); renderCorriere(); }
 function removeTappa(i){ const s=giroSeq(); s.splice(i,1); renderCorriere(); }
 function svuotaGiro(){ corriereGiroFisso[corrDayKey(0)]=[]; renderCorriere(); }
+
+// ── Giro su misura: Franco seleziona i viaggi dalle pagine Oggi / Per sede.
+let giroMisura={};
+function misuraMap(){ const k=corrDayKey(0); giroMisura[k]=giroMisura[k]||{}; return giroMisura[k]; }
+function inMisura(id){ return !!misuraMap()[id]; }
+function misuraCount(){ return Object.keys(misuraMap()).filter(k=>misuraMap()[k]).length; }
+function toggleGiroMisura(id){
+  const m=misuraMap(); if(m[id]) delete m[id]; else m[id]=true;
+  saveGiroState();
+  const eid=id.replace(/[^a-zA-Z0-9]/g,'_');
+  try{ document.querySelectorAll(`[data-gm="${eid}"]`).forEach(b=>{ const on=inMisura(id); b.innerHTML=on?'✓ Nel giro':'+ Nel giro'; b.classList.toggle('primary',on); }); }catch(e){}
+  const vc=document.getElementById('view-corriere'); if(vc&&vc.style.display!=='none') renderCorriere();
+}
 // Porta l'ordine appena calcolato in automatico dentro la modalità manuale, per rifinirlo.
 function autoAManuale(){
   const p=corriereLastPlan;
@@ -1288,11 +1330,18 @@ function renderCorriere(){
   const rawFissi=rawAll.filter(it=>!it.finestra);                  // viaggi fissi del giorno
   const rawFlex=rawAll.filter(it=>it.finestra);                    // spostamenti flessibili (finestra)
   const flexInGiro=rawFlex.filter(it=>flexIncluso(it.id));         // flessibili scelti per oggi
-  const oggiItems=rawFissi.concat(flexInGiro);
+  const usaMisura=(modoGiro()==='misura');
+  // Su misura: i colli sono quelli selezionati da Franco (da qualsiasi calendario)
+  const selMap=misuraMap();
+  const selItems=usaMisura?viaggi.filter(v=>selMap[v.id]&&v.from!=='??'&&v.to!=='??'&&v.from!==v.to)
+    .map(v=>({id:v.id,from:v.from,to:v.to,label:v.merce||v.summary||'(materiale)',finestra:false,giorniFinestra:1,endDate:'',scadenza:'',pren:prenDi(v.id,(v.summary||'')+' '+(v.note||''))})):[];
+  const oggiItems=usaMisura?selItems:rawFissi.concat(flexInGiro);
   const senzaRotta=viaggi.filter(v=>v.calId==='corrierelocom@gmail.com' && (v.from==='??'||v.to==='??'||v.from===v.to));
 
-  if(!rawAll.length && !senzaRotta.length && !carried.length){
-    body.innerHTML='<div class="empty"><i class="ti ti-truck"></i> Nessun viaggio del Corriere per questo giorno. Carica una giornata dalla vista <strong>Oggi</strong>.</div>';
+  if(!usaMisura && !rawAll.length && !senzaRotta.length && !carried.length){
+    corriereLastPlan={totKm:0,totMin:0,seq:[],restano:[]};
+    corriereLastCtx={fisso:false,seq:[],items:[],carried:[]};
+    body.innerHTML='<div class="empty"><i class="ti ti-truck"></i> Nessun viaggio del Corriere per questo giorno.</div>'+urgenzaCardHtml();
     return;
   }
 
@@ -1314,7 +1363,11 @@ function renderCorriere(){
 
   let plan, restaFuori;
   const mapIt=c=>({id:c.id,from:c.from,to:c.to,label:c.label,deliver:c.deliver,pren:c.pren});
-  if(usaFisso){
+  if(usaMisura){
+    // Giro su misura: solo i colli selezionati, ottimizzati in automatico dalla base.
+    plan=pianificaGiro(corriereBase, inGiroTodayAll.map(mapIt), carriedActive.map(mapIt));
+    restaFuori=rawAll.filter(it=>!selMap[it.id]).map(it=>({id:it.id,from:it.from,to:it.to,label:it.label,pren:it.pren,stato:'giro'}));
+  }else if(usaFisso){
     // Segue l'ordine dato da Franco (doppi passaggi ammessi).
     plan=pianificaGiroFisso(seqFissa, inGiroTodayAll.map(mapIt), carriedActive.map(mapIt));
     const fuoriIds=new Set(plan.fuori.map(x=>x.id));
@@ -1328,13 +1381,13 @@ function renderCorriere(){
   }
   // Contesto per il valutatore di urgenza (radioline): ricalcola sul giro attuale.
   corriereLastCtx={ fisso:usaFisso, seq:seqFissa.slice(),
-    items:(usaFisso?inGiroTodayAll:inGiroTodayAll.filter(c=>allowedSede(c.from)&&allowedSede(c.to))).map(mapIt),
+    items:(usaMisura?inGiroTodayAll:usaFisso?inGiroTodayAll:inGiroTodayAll.filter(c=>allowedSede(c.from)&&allowedSede(c.to))).map(mapIt),
     carried:carriedActive.map(mapIt) };
   const fuoriSet=new Set(restaFuori.map(c=>c.id));
   // ciò che resta a bordo va nel giro di DOMANI
   corriereCarry[corrDayKey(1)]=plan.restano.map(x=>({id:x.id,from:x.from,to:x.to,label:x.label}));
   try{localStorage.setItem('locom_corriere_carry',JSON.stringify(corriereCarry));}catch(e){}
-  const nColli=(inGiroTodayAll.length-restaFuori.length)+carriedActive.length;
+  const nColli=usaMisura?(inGiroTodayAll.length+carriedActive.length):((inGiroTodayAll.length-restaFuori.length)+carriedActive.length);
   const nFermate=plan.seq.filter(s=>!s.start&&!s.rientro).length;
   corriereLastPlan=plan; corriereLastMeta={data:corrDayKey(0),base:corriereBase,nColli,nFermate,sediTxt:(usaFisso?('ordine fisso: '+seqFissa.map(c=>SEDI[c]?.label||c).join(' → ')):(tutteSediScelte()?'tutte':Object.keys(SEDI).filter(c=>allowedSede(c)).map(c=>SEDI[c].label).join(', ')))};
   corriereLastFuori=restaFuori.map(c=>({from:c.from,to:c.to,label:c.label}));
@@ -1360,24 +1413,16 @@ function renderCorriere(){
   }
 
   // Valutazione urgenza (radioline)
-  const sedeOpts=Object.keys(SEDI).map(c=>`<option value="${c}">${SEDI[c].label}</option>`).join('');
-  html+=`<div class="card" style="margin-top:12px"><div class="card-header"><span class="card-title"><i class="ti ti-broadcast"></i> Urgenza dalla radio — ci sta nel giro?</span></div>
-    <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px">
-      <select id="urg-from" style="font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid var(--border);background:var(--surface)"><option value="">Da…</option>${sedeOpts}</select>
-      <i class="ti ti-arrow-right" style="color:#c8cdd6"></i>
-      <select id="urg-to" style="font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid var(--border);background:var(--surface)"><option value="">A…</option>${sedeOpts}</select>
-      <input type="text" id="urg-desc" placeholder="cosa serve (es. generatore x cliente)" style="flex:1 1 160px;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid var(--border)">
-      <button class="btn primary" style="padding:4px 12px;font-size:12px" onclick="valutaUrgenza()">Valuta</button>
-    </div>
-    <div id="urg-result" style="margin-top:10px"></div>
-  </div>`;
+  html+=urgenzaCardHtml();
 
   // Impostazione giro: automatico oppure ordine fisso deciso da Franco
   const modo=modoGiro();
   html+='<div class="card" style="margin-top:12px"><div class="card-header"><span class="card-title">Impostazione giro</span>'+
-    `<div style="display:flex;gap:4px"><button class="btn ${modo==='auto'?'primary':''}" style="padding:3px 10px;font-size:11px" onclick="setModo('auto')">Automatico</button><button class="btn ${modo==='fisso'?'primary':''}" style="padding:3px 10px;font-size:11px" onclick="setModo('fisso')">Ordine fisso</button></div>`+
+    `<div style="display:flex;gap:4px"><button class="btn ${modo==='auto'?'primary':''}" style="padding:3px 10px;font-size:11px" onclick="setModo('auto')">Automatico</button><button class="btn ${modo==='fisso'?'primary':''}" style="padding:3px 10px;font-size:11px" onclick="setModo('fisso')">Ordine fisso</button><button class="btn ${modo==='misura'?'primary':''}" style="padding:3px 10px;font-size:11px" onclick="setModo('misura')">Su misura</button></div>`+
     '</div>';
-  if(modo==='auto'){
+  if(modo==='misura'){
+    html+=`<div style="font-size:12px;color:var(--text-secondary);margin:6px 0">Giro costruito da te: <b>${misuraCount()} viaggi selezionati</b>. Aggiungi o togli viaggi dalle pagine <b>Oggi</b> e <b>Per sede</b> con il pulsante “+ Nel giro”. Il percorso di carico/scarico è calcolato solo sui selezionati; il resto finisce in “Restano fuori”.</div>`;
+  }else if(modo==='auto'){
     html+='<div style="font-size:12px;color:var(--text-secondary);margin:6px 0 8px">Sedi da toccare '+(tutteSediScelte()?'<span style="color:var(--text-muted)">(tutte · giro completo)</span>':'<button class="btn" style="padding:1px 9px;font-size:11px" onclick="resetSedi()"><i class="ti ti-rotate"></i> Tutte</button>')+'</div><div style="display:flex;flex-wrap:wrap;gap:6px">';
     Object.keys(SEDI).forEach(code=>{
       const isBase=(code===corriereBase); const on=isBase?true:sedeScelta(code);
@@ -1404,7 +1449,7 @@ function renderCorriere(){
   html+='</div>';
 
 
-  html+=`<div class="card" style="margin-top:4px"><div class="card-header"><span class="card-title">${usaFisso?'Percorso fisso (ordine scelto)':'Percorso ottimizzato'} — cosa carica e cosa scarica</span></div>`;
+  html+=`<div class="card" style="margin-top:4px"><div class="card-header"><span class="card-title">${usaMisura?'Giro su misura (i tuoi selezionati)':usaFisso?'Percorso fisso (ordine scelto)':'Percorso ottimizzato'} — cosa carica e cosa scarica</span></div>`;
   plan.seq.forEach((s,i)=>{
     const meta=SEDI[s.code]||{label:s.code,color:'#888'};
     const tag = s.start?'<span class="tag" style="background:var(--surface-2);color:var(--text-secondary)">partenza</span>'
@@ -1467,8 +1512,12 @@ function renderCorriere(){
       const eid=(c.id+'_f').replace(/[^a-zA-Z0-9]/g,'_');
       html+=`<div class="viaggio" style="cursor:default">
         <div class="v-top" style="flex-wrap:wrap;gap:8px">
-          <span class="v-route" style="flex:1 1 200px">${SEDI[c.from]?.label||c.from} <i class="ti ti-arrow-right" style="font-size:12px;color:#c8cdd6"></i> ${SEDI[c.to]?.label||c.to} — ${c.label}</span>
-          <button class="btn" style="padding:3px 9px;font-size:11px" onclick="document.getElementById('mv-${eid}').style.display='flex'"><i class="ti ti-calendar-event"></i> Sposta a domani / altra data</button>
+          <span class="v-route" style="flex:1 1 200px">${c.pren?'<span style="color:#b45309">★</span> ':''}${SEDI[c.from]?.label||c.from} <i class="ti ti-arrow-right" style="font-size:12px;color:#c8cdd6"></i> ${SEDI[c.to]?.label||c.to} — ${c.label}</span>
+          <div style="display:flex;gap:4px;flex-wrap:wrap">
+            <button class="btn" style="padding:3px 9px;font-size:11px" onclick="rimandaADomani('${c.id}')"><i class="ti ti-arrow-forward"></i> A domani</button>
+            <button class="btn" style="padding:3px 9px;font-size:11px" onclick="document.getElementById('mv-${eid}').style.display='flex'"><i class="ti ti-calendar-event"></i> Altra data</button>
+            <button class="btn" style="padding:3px 9px;font-size:11px;color:var(--red)" onclick="eliminaViaggio('${c.id}','${eid}')"><i class="ti ti-trash"></i> Elimina</button>
+          </div>
         </div>
         <div id="mv-${eid}" style="display:none;gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap">
           <span style="font-size:12px;color:var(--text-secondary)">Sposta a</span>
@@ -1525,8 +1574,8 @@ function renderCorriere(){
   disegnaMappaCorriere(plan);
   saveGiroState();
 }
-function saveGiroState(){ try{ localStorage.setItem('locom_giro_state', JSON.stringify({stato:corriereStato,pickup:corrierePickup,flex:corriereFlex,modo:corriereModo,fisso:corriereGiroFisso,sedi:corriereSedi})); }catch(e){} }
-function loadGiroState(){ try{ const s=JSON.parse(localStorage.getItem('locom_giro_state')||'{}'); if(s.stato)corriereStato=s.stato; if(s.pickup)corrierePickup=s.pickup; if(s.flex)corriereFlex=s.flex; if(s.modo)corriereModo=s.modo; if(s.fisso)corriereGiroFisso=s.fisso; if(s.sedi)corriereSedi=s.sedi; }catch(e){} }
+function saveGiroState(){ try{ localStorage.setItem('locom_giro_state', JSON.stringify({stato:corriereStato,pickup:corrierePickup,flex:corriereFlex,modo:corriereModo,fisso:corriereGiroFisso,sedi:corriereSedi,misura:giroMisura})); }catch(e){} }
+function loadGiroState(){ try{ const s=JSON.parse(localStorage.getItem('locom_giro_state')||'{}'); if(s.stato)corriereStato=s.stato; if(s.pickup)corrierePickup=s.pickup; if(s.flex)corriereFlex=s.flex; if(s.modo)corriereModo=s.modo; if(s.fisso)corriereGiroFisso=s.fisso; if(s.sedi)corriereSedi=s.sedi; if(s.misura)giroMisura=s.misura; }catch(e){} }
 loadGiroState();
 
 function disegnaMappaCorriere(plan){

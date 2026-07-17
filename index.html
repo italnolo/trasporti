@@ -1105,7 +1105,6 @@ function pianificaGiro(base, items, startOnboard){
 // alla prima tappa uguale alla destinazione che viene DOPO il carico.
 function pianificaGiroFisso(seqCodes, items, startOnboard){
   startOnboard=startOnboard||[];
-  const stops=seqCodes.map(code=>({code,carica:[],scarica:[],onboardAfter:[],km:0,min:0}));
   const fuori=[];
   const loadAt={}, unloadAt={}, preUnloadAt={};
   // carichi già a bordo da ieri: scaricati alla prima occorrenza della destinazione
@@ -1125,18 +1124,33 @@ function pianificaGiroFisso(seqCodes, items, startOnboard){
     }
   });
   let onboard=startOnboard.slice(), totKm=0, totMin=0;
+  // REGOLA: si toccano SOLO le sedi con un carico o uno scarico. La sequenza
+  // definisce ordine e direzione, ma le tappe senza attività si saltano.
+  // Restano sempre la partenza (base) e il rientro finale.
+  const attive=new Set([0, seqCodes.length-1]);
+  Object.keys(loadAt).forEach(i=>attive.add(+i));
+  Object.keys(unloadAt).forEach(i=>attive.add(+i));
+  Object.keys(preUnloadAt).forEach(i=>attive.add(+i));
+  const stops=[]; let prev=null;
   for(let i=0;i<seqCodes.length;i++){
-    if(i>0){ const t=tratta(seqCodes[i-1],seqCodes[i]); stops[i].km=t.km; stops[i].min=t.min; totKm+=t.km; totMin+=t.min; }
+    if(!attive.has(i)) continue;                    // sede senza viaggi: non si tocca
     const sc=[...(preUnloadAt[i]||[]),...(unloadAt[i]||[])];
     sc.forEach(it=>{ onboard=onboard.filter(x=>x.id!==it.id); });
-    stops[i].scarica=sc;
-    if(i===0) stops[i].preloaded=startOnboard.slice();
     const ca=(loadAt[i]||[]);
     ca.forEach(it=>onboard.push(it));
-    stops[i].carica=ca;
-    stops[i].onboardAfter=onboard.slice();
+    const last=stops[stops.length-1];
+    if(last && last.code===seqCodes[i]){            // stessa sede consecutiva: un'unica fermata
+      last.scarica=last.scarica.concat(sc);
+      last.carica=last.carica.concat(ca);
+      last.onboardAfter=onboard.slice();
+      prev=i; continue;
+    }
+    const s={code:seqCodes[i],carica:ca,scarica:sc,onboardAfter:onboard.slice(),km:0,min:0};
+    if(prev!==null){ const t=tratta(seqCodes[prev],seqCodes[i]); s.km=t.km; s.min=t.min; totKm+=t.km; totMin+=t.min; }
+    if(stops.length===0) s.preloaded=startOnboard.slice();
+    stops.push(s); prev=i;
   }
-  if(stops.length){ stops[0].start=true; stops[stops.length-1].rientro=true; }
+  if(stops.length){ stops[0].start=true; if(stops.length>1) stops[stops.length-1].rientro=true; }
   return {seq:stops, totKm, totMin, restano:onboard.slice(), fuori};
 }
 

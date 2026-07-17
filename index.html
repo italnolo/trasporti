@@ -1257,14 +1257,19 @@ async function autorizzaGiroSedi(){
   for(let i=0;i<targets.length;i++){
     const s=7*60+30+i*30, e=s+30;
     try{
+      // date:null forza Google a togliere il "tutto il giorno" e passare all'orario
       await apiPatchEvent(CORRIERE_CAL, targets[i], {
-        start:{dateTime:`${ds}T${hhmm(s)}:00`,timeZone:'Europe/Rome'},
-        end:{dateTime:`${ds}T${hhmm(e)}:00`,timeZone:'Europe/Rome'}
+        start:{date:null, dateTime:`${ds}T${hhmm(s)}:00`, timeZone:'Europe/Rome'},
+        end:{date:null, dateTime:`${ds}T${hhmm(e)}:00`, timeZone:'Europe/Rome'}
       });
       ok++;
     }catch(err){ errs.push(err.message); }
   }
-  alert(`Giro autorizzato: ${ok} viaggi con orario`+(errs.length?`\n${errs.length} non aggiornati (permessi o rete).`:'.'));
+  if(ok===0 && errs.length){
+    alert('Nessuna nota spostata.\nMotivo del primo errore:\n'+errs[0]+'\n\n(Se dice 403 = manca il permesso di scrittura sul calendario Corriere per questo account.)');
+  }else{
+    alert(`Giro autorizzato: ${ok} viaggi con orario`+(errs.length?`\n${errs.length} non aggiornati — es: ${errs[0]}`:'.'));
+  }
   loadDay();
 }
 

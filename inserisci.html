@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Richiesta viaggio — Corriere Lo.Com</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+  :root{--ink:#14181f;--muted:#5b6472;--line:#d9dee6;--accent:#1a56db;--green:#0a7d4b;--red:#b42318;--amber:#b45309;--soft:#f4f6f9;}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;color:var(--ink);background:#e9edf2;line-height:1.5;padding:16px}
+  .sheet{max-width:520px;margin:0 auto;background:#fff;padding:22px 20px 26px;border-radius:12px;box-shadow:0 4px 18px rgba(0,0,0,.08)}
+  header{display:flex;align-items:center;gap:12px;border-bottom:2px solid var(--ink);padding-bottom:12px;margin-bottom:16px}
+  .logo{width:40px;height:40px;border-radius:9px;background:var(--accent);color:#fff;font-weight:800;font-size:15px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  h1{font-size:17px}
+  .sub{font-size:11.5px;color:var(--muted)}
+  label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin:12px 0 4px;text-transform:uppercase;letter-spacing:.04em}
+  input[type=text],input[type=date],select,textarea{width:100%;font-size:15px;padding:10px 11px;border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--ink);font-family:inherit}
+  .row{display:flex;gap:10px}
+  .row>div{flex:1}
+  .tipo{display:flex;gap:8px;flex-wrap:wrap;margin-top:2px}
+  .tipo label{display:flex;align-items:center;gap:6px;margin:0;padding:9px 12px;border:1px solid var(--line);border-radius:9px;font-size:13px;text-transform:none;letter-spacing:0;cursor:pointer;font-weight:500;color:var(--ink)}
+  .tipo input{accent-color:var(--accent)}
+  .btn{width:100%;margin-top:18px;padding:13px;border:none;border-radius:10px;background:var(--accent);color:#fff;font-size:16px;font-weight:600;cursor:pointer;font-family:inherit}
+  .btn:disabled{opacity:.55}
+  .btn.google{background:#fff;color:var(--ink);border:1px solid var(--line)}
+  #esito{margin-top:14px;font-size:14px;border-radius:9px;padding:12px}
+  .ok{background:#eaf5ef;color:var(--green);border:1px solid #bfe0cc}
+  .err{background:#fdeceb;color:var(--red);border:1px solid #f3c2be}
+  .hint{font-size:11.5px;color:var(--muted);margin-top:4px}
+  .anteprima{margin-top:12px;font-family:'Consolas',monospace;font-size:13px;background:var(--soft);border:1px dashed var(--line);border-radius:8px;padding:9px 11px;color:var(--ink);word-break:break-word}
+  #box-form{display:none}
+</style>
+</head>
+<body>
+<div class="sheet">
+  <header>
+    <div class="logo">LC</div>
+    <div>
+      <h1>Richiesta viaggio Corriere</h1>
+      <div class="sub">Il viaggio viene inserito nel calendario del Corriere · lo autorizza Franco nel giro</div>
+    </div>
+  </header>
+
+  <div id="box-login">
+    <p style="font-size:14px;margin-bottom:6px">Accedi con l'account Google della tua sede (una volta sola su questo dispositivo).</p>
+    <button class="btn google" onclick="login()">Accedi con Google</button>
+    <div id="login-err"></div>
+  </div>
+
+  <div id="box-form">
+    <div class="row">
+      <div><label>Da (partenza)</label><select id="f-from"></select></div>
+      <div><label>A (arrivo)</label><select id="f-to"></select></div>
+    </div>
+
+    <label>Articolo</label>
+    <input type="text" id="f-art" placeholder="es. Calcio balilla">
+
+    <label>Accessori (opzionale)</label>
+    <input type="text" id="f-acc" placeholder="es. palline">
+    <div class="hint">Compaiono tra parentesi nel titolo.</div>
+
+    <label>Tipo</label>
+    <div class="tipo">
+      <label><input type="radio" name="tipo" value="" checked> Nessuno</label>
+      <label><input type="radio" name="tipo" value="DN"> DN — serve per un noleggio</label>
+      <label><input type="radio" name="tipo" value="RB"> RB — rientro / bilanciamento</label>
+    </div>
+    <div id="row-dn" style="display:none">
+      <label>Data noleggio (entro il)</label>
+      <input type="date" id="f-dn">
+    </div>
+
+    <label>Quando fare il viaggio</label>
+    <div class="tipo">
+      <label><input type="radio" name="quando" value="giorno" checked> Giorno preciso</label>
+      <label><input type="radio" name="quando" value="finestra"> Finestra di giorni</label>
+    </div>
+    <div id="row-giorno"><label>Giorno richiesto</label><input type="date" id="f-g1"></div>
+    <div id="row-finestra" style="display:none">
+      <div class="row">
+        <div><label>Dal</label><input type="date" id="f-w1"></div>
+        <div><label>Al (compreso)</label><input type="date" id="f-w2"></div>
+      </div>
+      <div class="hint">Franco lo inserirà nel giro quando c'è spazio, entro la finestra.</div>
+    </div>
+
+    <label>Note (opzionale)</label>
+    <input type="text" id="f-note" placeholder="es. cliente Rossi, ritiro in piazzale">
+
+    <div class="anteprima" id="anteprima">—</div>
+
+    <button class="btn" id="btn-invia" onclick="invia()">Inserisci nel calendario Corriere</button>
+    <div id="esito"></div>
+  </div>
+</div>
+
+<script>
+const CLIENT_ID='370258072847-9uotn4l79r2ck2r2kpsea0it12l7c08i.apps.googleusercontent.com';
+const SCOPES='https://www.googleapis.com/auth/calendar.events';
+const CORRIERE_CAL='corrierelocom@gmail.com';
+const SEDI={SP:'La Spezia',SZ:'Sarzana',MS:'Massa',VI:'Viareggio',LU:'Lucca',PI:'Pisa',EM:'Empoli',GE:'Pontedera/Gello'};
+let accessToken=null, tokenClient=null;
+
+function init(){
+  const opts=Object.keys(SEDI).map(c=>`<option value="${c}">${SEDI[c]} (${c})</option>`).join('');
+  document.getElementById('f-from').innerHTML='<option value="">—</option>'+opts;
+  document.getElementById('f-to').innerHTML='<option value="">—</option>'+opts;
+  const oggi=new Date().toISOString().split('T')[0];
+  document.getElementById('f-g1').value=oggi;
+  document.getElementById('f-w1').value=oggi;
+  document.getElementById('f-w2').value=oggi;
+  document.querySelectorAll('input[name=tipo]').forEach(r=>r.addEventListener('change',()=>{document.getElementById('row-dn').style.display=(tipoSel()==='DN')?'':'none';anteprima();}));
+  document.querySelectorAll('input[name=quando]').forEach(r=>r.addEventListener('change',()=>{const g=quandoSel()==='giorno';document.getElementById('row-giorno').style.display=g?'':'none';document.getElementById('row-finestra').style.display=g?'none':'';}));
+  ['f-from','f-to','f-art','f-acc','f-dn'].forEach(id=>document.getElementById(id).addEventListener('input',anteprima));
+  ['f-from','f-to'].forEach(id=>document.getElementById(id).addEventListener('change',anteprima));
+}
+function tipoSel(){return document.querySelector('input[name=tipo]:checked').value;}
+function quandoSel(){return document.querySelector('input[name=quando]:checked').value;}
+function ddmm(iso){if(!iso)return'';const[y,m,d]=iso.split('-');return d+'/'+m;}
+function titolo(){
+  const f=document.getElementById('f-from').value,t=document.getElementById('f-to').value;
+  const art=document.getElementById('f-art').value.trim();
+  const acc=document.getElementById('f-acc').value.trim();
+  let s=(f&&t?f+'-'+t+' ':'')+art;
+  if(acc)s+=' ('+acc+')';
+  const tp=tipoSel();
+  if(tp==='DN'&&document.getElementById('f-dn').value)s+=' - DN '+ddmm(document.getElementById('f-dn').value);
+  if(tp==='RB')s+=' - RB';
+  return s.trim();
+}
+function anteprima(){document.getElementById('anteprima').textContent=titolo()||'—';}
+
+function login(){
+  try{
+    if(!tokenClient){
+      tokenClient=google.accounts.oauth2.initTokenClient({client_id:CLIENT_ID,scope:SCOPES,callback:(r)=>{
+        if(r&&r.access_token){accessToken=r.access_token;document.getElementById('box-login').style.display='none';document.getElementById('box-form').style.display='block';anteprima();}
+      }});
+    }
+    tokenClient.requestAccessToken();
+  }catch(e){
+    document.getElementById('login-err').innerHTML='<div id="esito" class="err">Errore di accesso: '+e.message+'</div>';
+  }
+}
+function nextDate(ds){const[y,m,d]=ds.split('-').map(Number);const dt=new Date(Date.UTC(y,m-1,d));dt.setUTCDate(dt.getUTCDate()+1);return dt.toISOString().split('T')[0];}
+
+async function invia(){
+  const es=document.getElementById('esito');es.className='';es.textContent='';
+  const f=document.getElementById('f-from').value,t=document.getElementById('f-to').value;
+  const art=document.getElementById('f-art').value.trim();
+  if(!f||!t){es.className='err';es.textContent='Scegli la sede di partenza e quella di arrivo.';return;}
+  if(f===t){es.className='err';es.textContent='Partenza e arrivo non possono essere la stessa sede.';return;}
+  if(!art){es.className='err';es.textContent='Scrivi l\'articolo da trasportare.';return;}
+  if(tipoSel()==='DN'&&!document.getElementById('f-dn').value){es.className='err';es.textContent='Hai scelto DN: indica la data del noleggio.';return;}
+  let start,end;
+  if(quandoSel()==='giorno'){
+    const g=document.getElementById('f-g1').value;
+    if(!g){es.className='err';es.textContent='Indica il giorno richiesto.';return;}
+    start={date:g};end={date:nextDate(g)};
+  }else{
+    const w1=document.getElementById('f-w1').value,w2=document.getElementById('f-w2').value;
+    if(!w1||!w2){es.className='err';es.textContent='Indica inizio e fine della finestra.';return;}
+    if(w2<w1){es.className='err';es.textContent='La fine della finestra è prima dell\'inizio.';return;}
+    start={date:w1};end={date:nextDate(w2)};
+  }
+  const note=document.getElementById('f-note').value.trim();
+  const desc=(note?note+'\n':'')+'Richiesta inserita dal modulo web';
+  const btn=document.getElementById('btn-invia');btn.disabled=true;btn.textContent='Invio…';
+  try{
+    const r=await fetch('https://www.googleapis.com/calendar/v3/calendars/'+encodeURIComponent(CORRIERE_CAL)+'/events',{
+      method:'POST',headers:{'Authorization':'Bearer '+accessToken,'Content-Type':'application/json'},
+      body:JSON.stringify({summary:titolo(),description:desc,start,end})
+    });
+    if(!r.ok){
+      const txt=await r.text();
+      if(r.status===401){accessToken=null;document.getElementById('box-form').style.display='none';document.getElementById('box-login').style.display='block';throw new Error('Sessione scaduta: accedi di nuovo.');}
+      if(r.status===403) throw new Error('Questo account non ha il permesso di scrivere sul calendario Corriere.');
+      throw new Error('HTTP '+r.status+' — '+txt.slice(0,140));
+    }
+    es.className='ok';
+    es.innerHTML='✔ Viaggio inserito nel calendario Corriere:<br><b>'+titolo()+'</b><br>Franco lo vedrà nel piano del giorno richiesto.';
+    document.getElementById('f-art').value='';document.getElementById('f-acc').value='';document.getElementById('f-note').value='';
+    document.querySelector('input[name=tipo][value=""]').checked=true;document.getElementById('row-dn').style.display='none';document.getElementById('f-dn').value='';
+    anteprima();
+  }catch(e){es.className='err';es.textContent='Errore: '+e.message;}
+  btn.disabled=false;btn.textContent='Inserisci nel calendario Corriere';
+}
+window.addEventListener('load',init);
+</script>
+</body>
+</html>

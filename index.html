@@ -1241,12 +1241,15 @@ async function inserisciUrgenza(delta,f,t,dEnc){
 // Da nota giornaliera a orari da 30 min in fila (partenza 07:30), nell'ordine del giro.
 async function autorizzaGiroSedi(){
   if(!accessToken){alert('Accedi prima con Google.');return;}
-  if(!corriereLastPlan||!corriereLastPlan.seq||!corriereLastPlan.seq.length){alert('Prepara prima il giro (Applica giro standard, ordine fisso o su misura).');return;}
+  const plan=corriereLastPlan;    // già aggiornato ad ogni modifica del giro
+  if(!plan||!plan.seq||!plan.seq.length){alert('Prepara prima il giro (Applica giro standard, ordine fisso o su misura).');return;}
   // Raccolgo i viaggi consegnati, nell'ordine in cui il giro li scarica.
   const ids=[]; const seen=new Set();
-  corriereLastPlan.seq.forEach(s=>{ (s.scarica||[]).forEach(it=>{ if(it&&it.id&&!seen.has(it.id)){seen.add(it.id); ids.push(it.id);} }); });
+  plan.seq.forEach(s=>{ (s.scarica||[]).forEach(it=>{ if(it&&it.id&&!seen.has(it.id)){seen.add(it.id); ids.push(it.id);} }); });
+  // se per qualche motivo non ci sono scarichi (giro senza consegne), uso i carichi
+  if(!ids.length){ plan.seq.forEach(s=>{ (s.carica||[]).forEach(it=>{ if(it&&it.id&&!seen.has(it.id)){seen.add(it.id); ids.push(it.id);} }); }); }
   const targets=ids.filter(id=>{ const v=viaggi.find(x=>x.id===id); return v && v.calId===CORRIERE_CAL; });
-  if(!targets.length){ alert('Nel giro non ci sono viaggi del Corriere a cui dare un orario.'); return; }
+  if(!targets.length){ alert('Nel giro non ci sono viaggi del Corriere a cui dare un orario. Controlla di aver preparato il giro con dei viaggi del Corriere.'); return; }
   if(!confirm(`Stai per dare un orario a ${targets.length} viaggi del giro di oggi: blocchi da 30 minuti a partire dalle 07:30, in ordine cronologico.\n\nVengono spostati da "tutto il giorno" a orario sul calendario Corriere (lo vedono tutte le sedi). Confermi?`)) return;
   const ds=corrDayKey(0);
   const hhmm=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');

@@ -227,6 +227,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text-primary);min-
   <div class="nav-item" id="nav-sedi" onclick="showView('sedi')"><i class="ti ti-building-warehouse"></i> Per sede</div>
   <div class="nav-item" id="nav-ottimiz" onclick="showView('ottimiz')"><i class="ti ti-route"></i> Ottimizzazioni <span class="nav-badge" id="nav-badge" style="display:none">0</span></div>
   <div class="nav-item" id="nav-corriere" onclick="showView('corriere')"><i class="ti ti-truck-delivery"></i> Giro Corriere</div>
+  <div class="nav-item" id="nav-tariffe" onclick="showView('tariffe')"><i class="ti ti-calculator"></i> Costo trasporto</div>
   <div class="nav-section">Gestione</div>
   <div class="nav-item" id="nav-nuovo" onclick="showView('nuovo')"><i class="ti ti-plus"></i> Nuovo viaggio</div>
   <div class="nav-item" id="nav-automezzi" onclick="showView('automezzi')"><i class="ti ti-truck"></i> Automezzi</div>
@@ -276,6 +277,45 @@ body{font-family:var(--font);background:var(--bg);color:var(--text-primary);min-
     <div style="font-size:22px;font-weight:600;margin-bottom:4px">Ottimizzazioni</div>
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:20px">Dove un mezzo rischia di viaggiare a vuoto: andata/ritorno e tratte da concatenare. Segna “gestito” quelle che hai sistemato.</div>
     <div id="ottimiz-list"></div>
+  </div>
+
+  <!-- COSTO TRASPORTO (da listino) -->
+  <div id="view-tariffe" style="display:none">
+    <div style="font-size:22px;font-weight:600;margin-bottom:4px">Costo trasporto</div>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px">Tabella costi di trasporto da listino · singola tratta · prezzi IVA esclusa.</div>
+    <div class="card">
+      <div class="form-grid">
+        <div class="form-group"><label>Mezzo</label>
+          <select id="tar-mezzo">
+            <option value="B">Autocarro/Furgone patente B (fino 15 q.li)</option>
+            <option value="C1">Autocarro patente C fino a 50 q.li</option>
+            <option value="C2">Autocarro patente C oltre 50 q.li</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Km della tratta (partenza → arrivo)</label><input type="number" id="tar-km" min="1" value="10"></div>
+      </div>
+      <div class="form-grid">
+        <div class="form-group"><label>Tratte</label>
+          <select id="tar-ar"><option value="1">Solo andata</option><option value="2">Andata e ritorno (×2)</option></select>
+        </div>
+        <div class="form-group"><label>Utilizzo gru ad intervento (E1)</label>
+          <select id="tar-gru"><option value="0">No</option><option value="1">Sì</option></select>
+        </div>
+      </div>
+      <div class="form-grid">
+        <div class="form-group"><label>Fermo macchina in attesa — ore (E2)</label><input type="number" id="tar-fermo" min="0" value="0"></div>
+        <div class="form-group"><label>Viabilità difficile / forza maggiore — ore (E4)</label><input type="number" id="tar-viab" min="0" value="0"></div>
+      </div>
+      <div class="form-group"><label>Consegna strade di montagna (E3)</label>
+        <select id="tar-mont"><option value="0">No</option><option value="30">Sì +30%</option><option value="40">Sì +40%</option><option value="50">Sì +50%</option></select>
+      </div>
+      <div class="btn-row"><button class="btn primary" onclick="calcolaTariffa()"><i class="ti ti-calculator"></i> Calcola</button></div>
+      <div id="tar-result" style="margin-top:14px"></div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <div class="card-header"><span class="card-title">Promemoria sopralluoghi</span></div>
+      <div style="font-size:13px;color:var(--text-secondary)">Fino a 25 km: <b>€50</b> · fino a 60 km: <b>€80</b> · oltre 60 km: <b>€1,40/km</b>. Addebitato solo se il sopralluogo ha esito negativo o il lavoro non viene conferito a Italnolo.</div>
+    </div>
   </div>
 
   <!-- GIRO CORRIERE (Franco) -->
@@ -1016,7 +1056,7 @@ async function eliminaViaggio(eventId,eid){
 function changeDay(delta){currentDay+=delta;loadDay();}
 
 function showView(name){
-  ['oggi','sedi','ottimiz','corriere','nuovo','automezzi'].forEach(v=>{
+  ['oggi','sedi','ottimiz','corriere','tariffe','nuovo','automezzi'].forEach(v=>{
     const el=document.getElementById('view-'+v); if(el) el.style.display=v===name?'':'none';
     const nav=document.getElementById('nav-'+v);
     if(nav) nav.classList.toggle('active',v===name);
@@ -1072,7 +1112,8 @@ function corriereItems(){
   return viaggi.filter(v=>v.calId==='corrierelocom@gmail.com' && v.from!=='??' && v.to!=='??' && v.from!==v.to)
     .map(v=>({id:v.id, from:v.from, to:v.to, label:v.merce||v.summary||'(materiale)',
               finestra:!!v.finestra, giorniFinestra:v.giorniFinestra||1, endDate:v.endDate||'', scadenza:v.scadenza||'',
-              pren:prenDi(v.id,(v.summary||'')+' '+(v.note||''))}));
+              pren:prenDi(v.id,(v.summary||'')+' '+(v.note||'')),
+              rb:/\bRB\b/i.test(v.summary||'')}));
 }
 
 // Heuristica: parti dalla base (Pisa), carica subito ciò che parte dalla base,
@@ -1166,7 +1207,7 @@ function setCorriereBase(v){ corriereBase=v; renderCorriere(); }
 let prenotati=JSON.parse(localStorage.getItem('locom_prenotati')||'{}');
 function prenDi(id,testo){
   if(prenotati[id]!==undefined) return !!prenotati[id];
-  return /NOLEGG|\bNOL\b|PRENOT|URGENT|CLIENTE/i.test(testo||'');
+  return /NOLEGG|\bNOL\b|PRENOT|URGENT|CLIENTE|\bDN\b/i.test(testo||'');
 }
 function togglePrenotato(id,testo){
   prenotati[id]=!prenDi(id,testo);
@@ -1214,11 +1255,11 @@ function valutaUrgenza(){
   let h;
   if(!fattibile){
     h=`<div style="color:var(--red);font-weight:600"><i class="ti ti-x"></i> Non ci sta nel giro attuale</div>
-       <div style="font-size:12px;color:var(--text-secondary);margin:4px 0 8px">Motivo: ${motivo}. Franco può dirlo subito alla radio, senza stravolgere il piano.</div>`;
+       <div style="font-size:12px;color:var(--text-secondary);margin:4px 0 8px">Motivo: ${motivo}. La risposta si dà subito via radio, senza stravolgere il piano.</div>`;
   }else{
     const col=dKm<=15?'var(--green)':dKm<=40?'var(--orange)':'var(--red)';
     h=`<div style="font-weight:600;color:${col}"><i class="ti ti-route"></i> Impatto sul giro: +${dKm} km · +${fmtMin(dMin)}</div>
-       <div style="font-size:12px;color:var(--text-secondary);margin:4px 0 8px">Il giro resta quello: l'urgenza si infila nelle tappe esistenti. Decide Franco.</div>`;
+       <div style="font-size:12px;color:var(--text-secondary);margin:4px 0 8px">Il giro resta quello: l'urgenza si infila nelle tappe esistenti. Fattibilità valutata da Emiliano e Fabrizio (solo via radio).</div>`;
   }
   const dEnc=encodeURIComponent(d);
   h+=`<div style="display:flex;gap:6px;flex-wrap:wrap">
@@ -1237,6 +1278,46 @@ async function inserisciUrgenza(delta,f,t,dEnc){
   try{ await apiCreateEvent(CORRIERE_CAL, body); loadDay(); }
   catch(e){ alert('Errore nello scrivere l\'urgenza:\n'+e.message); }
 }
+// ── Calcolo costo trasporto (Tabella costi di trasporto del listino) ──
+// G1 0-15 km: forfait B €60 / C≤50q €80 / C>50q €100.
+// G2 16-50 km e G3 oltre 50: tariffa €/km applicata ai km della tratta.
+// Supplementi: E1 gru €20 (B) / €25 (C); E2 fermo €45/h (B) / €60/h (C);
+// E3 montagna +30÷50%; E4 viabilità difficile €50/h (B) / €70/h (C).
+const TARIFFE={
+  B:  {g1:60,  g2:2.00, g3:2.00, gru:20, fermo:45, viab:50},
+  C1: {g1:80,  g2:2.60, g3:2.20, gru:25, fermo:60, viab:70},
+  C2: {g1:100, g2:2.80, g3:2.40, gru:25, fermo:60, viab:70},
+};
+function calcolaTariffa(){
+  const t=TARIFFE[document.getElementById('tar-mezzo').value];
+  const km=Math.max(1,parseInt(document.getElementById('tar-km').value||'0',10));
+  const tratte=parseInt(document.getElementById('tar-ar').value,10);
+  const gru=document.getElementById('tar-gru').value==='1';
+  const oreFermo=Math.max(0,parseInt(document.getElementById('tar-fermo').value||'0',10));
+  const oreViab=Math.max(0,parseInt(document.getElementById('tar-viab').value||'0',10));
+  const mont=parseInt(document.getElementById('tar-mont').value,10);
+  let base, fascia;
+  if(km<=15){ base=t.g1; fascia='G1 (0-15 km, forfait)'; }
+  else if(km<=50){ base=t.g2*km; fascia=`G2 (${t.g2.toFixed(2)} €/km × ${km} km)`; }
+  else { base=t.g3*km; fascia=`G3 (${t.g3.toFixed(2)} €/km × ${km} km)`; }
+  base=base*tratte;
+  const supMont=mont? base*mont/100 : 0;
+  const supGru=gru? t.gru : 0;
+  const supFermo=oreFermo*t.fermo;
+  const supViab=oreViab*t.viab;
+  const tot=base+supMont+supGru+supFermo+supViab;
+  const eur=x=>x.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2});
+  let righe=`<tr><td>Trasporto ${fascia}${tratte===2?' · A/R ×2':''}</td><td style="text-align:right">€ ${eur(base)}</td></tr>`;
+  if(supMont) righe+=`<tr><td>Supplemento montagna +${mont}% (E3)</td><td style="text-align:right">€ ${eur(supMont)}</td></tr>`;
+  if(supGru) righe+=`<tr><td>Gru ad intervento (E1)</td><td style="text-align:right">€ ${eur(supGru)}</td></tr>`;
+  if(supFermo) righe+=`<tr><td>Fermo macchina ${oreFermo}h (E2)</td><td style="text-align:right">€ ${eur(supFermo)}</td></tr>`;
+  if(supViab) righe+=`<tr><td>Viabilità difficile ${oreViab}h (E4)</td><td style="text-align:right">€ ${eur(supViab)}</td></tr>`;
+  document.getElementById('tar-result').innerHTML=`
+    <table style="width:100%;border-collapse:collapse;font-size:13px">${righe}
+      <tr style="font-weight:700;border-top:2px solid var(--border)"><td style="padding-top:6px">Totale (IVA esclusa)</td><td style="padding-top:6px;text-align:right;font-size:16px">€ ${eur(tot)}</td></tr>
+    </table>`;
+}
+
 function stampaPiano(){
   if(!corriereLastPlan){alert('Apri il Giro Corriere e carica una giornata prima di stampare.');return;}
   const p=corriereLastPlan, m=corriereLastMeta;
@@ -1349,7 +1430,7 @@ function renderCorriere(){
   const colli=oggiItems.map(it=>{
     const stato=statoCollo(it.id);
     const from=pickupCollo(it.id)||it.from;
-    return {id:it.id, from, fromOrig:it.from, to:it.to, label:it.label, stato, deliver:(stato==='giro'), carried:false, pren:it.pren};
+    return {id:it.id, from, fromOrig:it.from, to:it.to, label:it.label, stato, deliver:(stato==='giro'), carried:false, pren:it.pren, rb:!!it.rb};
   });
   // colli GIÀ a bordo da ieri
   const colliCarried=carried.map(it=>{
@@ -1493,7 +1574,7 @@ function renderCorriere(){
       </div>`;
     html+=`<div class="viaggio" style="cursor:default;${c.stato==='tolto'?'opacity:.5':''}">
       <div class="v-top" style="flex-wrap:wrap;gap:8px">
-        <span class="v-route" style="flex:1 1 200px">${c.carried?'<i class="ti ti-package-import" style="color:var(--accent)"></i> ':''}${c.pren?'<span style="color:#b45309">★</span> ':''}${c.label}</span>
+        <span class="v-route" style="flex:1 1 200px">${c.carried?'<i class="ti ti-package-import" style="color:var(--accent)"></i> ':''}${c.pren?'<span style="color:#b45309">★</span> ':''}${c.rb?'<span class="tag" style="background:var(--surface-2);color:var(--text-secondary);font-size:10px">RB</span> ':''}${c.label}</span>
         <div style="display:flex;gap:4px">${prenBtn}${seg('giro','In giro')}${seg('bordo',bordoLbl)}${seg('tolto','Togli')}</div>
       </div>
       <div style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12px;color:var(--text-secondary);flex-wrap:wrap">

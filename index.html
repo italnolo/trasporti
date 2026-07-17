@@ -317,7 +317,8 @@ body{font-family:var(--font);background:var(--bg);color:var(--text-primary);min-
       <label style="font-size:12px;color:var(--text-muted)">Base di Franco</label>
       <select id="corr-base" onchange="setCorriereBase(this.value)" style="font-size:13px;padding:7px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text-primary);font-family:var(--font)"></select>
       <span style="font-size:11px;color:var(--text-muted)">parte e rientra qui</span>
-      <button class="btn" style="margin-left:auto" onclick="stampaPiano()"><i class="ti ti-printer"></i> Stampa piano</button>
+      <button class="btn success" style="margin-left:auto" onclick="autorizzaGiroSedi()"><i class="ti ti-clock-check"></i> Autorizza giro sedi »</button>
+      <button class="btn" onclick="stampaPiano()"><i class="ti ti-printer"></i> Stampa piano</button>
     </div>
     <div id="corr-body"><div class="loading-row"><span class="spinner"></span> Carico...</div></div>
   </div>
@@ -1237,6 +1238,33 @@ async function inserisciUrgenza(delta,f,t,dEnc){
   try{ await apiCreateEvent(CORRIERE_CAL, body); loadDay(); }
   catch(e){ alert('Errore nello scrivere l\'urgenza:\n'+e.message); }
 }
+// Da nota giornaliera a orari da 30 min in fila (partenza 07:30), nell'ordine del giro.
+async function autorizzaGiroSedi(){
+  if(!accessToken){alert('Accedi prima con Google.');return;}
+  if(!corriereLastPlan||!corriereLastPlan.seq||!corriereLastPlan.seq.length){alert('Prepara prima il giro (Applica giro standard, ordine fisso o su misura).');return;}
+  // Raccolgo i viaggi consegnati, nell'ordine in cui il giro li scarica.
+  const ids=[]; const seen=new Set();
+  corriereLastPlan.seq.forEach(s=>{ (s.scarica||[]).forEach(it=>{ if(it&&it.id&&!seen.has(it.id)){seen.add(it.id); ids.push(it.id);} }); });
+  const targets=ids.filter(id=>{ const v=viaggi.find(x=>x.id===id); return v && v.calId===CORRIERE_CAL; });
+  if(!targets.length){ alert('Nel giro non ci sono viaggi del Corriere a cui dare un orario.'); return; }
+  if(!confirm(`Stai per dare un orario a ${targets.length} viaggi del giro di oggi: blocchi da 30 minuti a partire dalle 07:30, in ordine cronologico.\n\nVengono spostati da "tutto il giorno" a orario sul calendario Corriere (lo vedono tutte le sedi). Confermi?`)) return;
+  const ds=corrDayKey(0);
+  const hhmm=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
+  let ok=0; const errs=[];
+  for(let i=0;i<targets.length;i++){
+    const s=7*60+30+i*30, e=s+30;
+    try{
+      await apiPatchEvent(CORRIERE_CAL, targets[i], {
+        start:{dateTime:`${ds}T${hhmm(s)}:00`,timeZone:'Europe/Rome'},
+        end:{dateTime:`${ds}T${hhmm(e)}:00`,timeZone:'Europe/Rome'}
+      });
+      ok++;
+    }catch(err){ errs.push(err.message); }
+  }
+  alert(`Giro autorizzato: ${ok} viaggi con orario`+(errs.length?`\n${errs.length} non aggiornati (permessi o rete).`:'.'));
+  loadDay();
+}
+
 // ── Calcolo costo trasporto (Tabella costi di trasporto del listino) ──
 // G1 0-15 km: forfait B €60 / C≤50q €80 / C>50q €100.
 // G2 16-50 km e G3 oltre 50: tariffa €/km applicata ai km della tratta.

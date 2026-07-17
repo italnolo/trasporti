@@ -1324,6 +1324,33 @@ function addTappa(code){ const k=corrDayKey(0); (corriereGiroFisso[k]=corriereGi
 function removeTappa(i){ const s=giroSeq(); s.splice(i,1); renderCorriere(); }
 function svuotaGiro(){ corriereGiroFisso[corrDayKey(0)]=[]; renderCorriere(); }
 
+// ── Giro standard settimanale (regole del vademecum) ──
+// Mattina direzione nord PI>LU>VI>MS>SZ · pomeriggio area sud SZ>VI>LU>PI>GE.
+// La Spezia in mattinata il martedì e giovedì · Empoli nel pomeriggio il
+// lunedì, mercoledì e venerdì. Rientro alla base Pisa.
+function giroStandardSeq(dateIso){
+  const g=new Date(dateIso+'T12:00:00').getDay();   // 0=dom … 6=sab
+  const seq=['PI','LU','VI','MS','SZ'];             // mattina · nord
+  if(g===2||g===4) seq.push('SP');                  // mar/gio: La Spezia in mattinata
+  seq.push('SZ','VI','LU','PI','GE');               // pomeriggio · sud
+  if(g===1||g===3||g===5) seq.push('EM');           // lun/mer/ven: Empoli nel pomeriggio
+  seq.push('PI');                                   // rientro base
+  const out=[]; seq.forEach(c=>{ if(out[out.length-1]!==c) out.push(c); });
+  return out;
+}
+function descGiroStandard(dateIso){
+  const g=new Date(dateIso+'T12:00:00').getDay();
+  if(g===2||g===4) return 'oggi con La Spezia in mattinata';
+  if(g===1||g===3||g===5) return 'oggi con Empoli nel pomeriggio';
+  return 'giro base (senza Empoli e La Spezia)';
+}
+function applicaGiroStandard(){
+  const ds=corrDayKey(0);
+  corriereGiroFisso[ds]=giroStandardSeq(ds);
+  corriereModo[ds]='fisso';
+  renderCorriere();
+}
+
 // ── Giro su misura: Franco seleziona i viaggi dalle pagine Oggi / Per sede.
 let giroMisura={};
 function misuraMap(){ const k=corrDayKey(0); giroMisura[k]=giroMisura[k]||{}; return giroMisura[k]; }
@@ -1446,6 +1473,10 @@ function renderCorriere(){
   html+='<div class="card" style="margin-top:12px"><div class="card-header"><span class="card-title">Impostazione giro</span>'+
     `<div style="display:flex;gap:4px"><button class="btn ${modo==='auto'?'primary':''}" style="padding:3px 10px;font-size:11px" onclick="setModo('auto')">Automatico</button><button class="btn ${modo==='fisso'?'primary':''}" style="padding:3px 10px;font-size:11px" onclick="setModo('fisso')">Ordine fisso</button><button class="btn ${modo==='misura'?'primary':''}" style="padding:3px 10px;font-size:11px" onclick="setModo('misura')">Su misura</button></div>`+
     '</div>';
+  html+=`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:2px 0 10px;padding:8px 10px;background:var(--surface-2);border-radius:8px;font-size:12px">
+    <button class="btn success" style="padding:4px 12px;font-size:12px" onclick="applicaGiroStandard()"><i class="ti ti-calendar-check"></i> Applica giro standard</button>
+    <span style="color:var(--text-secondary)">mattina nord · pomeriggio sud · <b>${descGiroStandard(corrDayKey(0))}</b></span>
+  </div>`;
   if(modo==='misura'){
     html+=`<div style="font-size:12px;color:var(--text-secondary);margin:6px 0">Giro costruito da te: <b>${misuraCount()} viaggi selezionati</b>. Aggiungi o togli viaggi dalle pagine <b>Oggi</b> e <b>Per sede</b> con il pulsante “+ Nel giro”. Il percorso di carico/scarico è calcolato solo sui selezionati; il resto finisce in “Restano fuori”.</div>`;
   }else if(modo==='auto'){

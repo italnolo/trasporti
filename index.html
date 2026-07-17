@@ -44,7 +44,6 @@ body{font-family:var(--font);background:var(--bg);color:var(--text-primary);min-
 .nav-item:hover{background:var(--surface-2);color:var(--text-primary)}
 .nav-item.active{background:var(--accent-light);color:var(--accent);border-left-color:var(--accent);font-weight:500}
 .nav-item .ti{font-size:16px}
-.nav-badge{margin-left:auto;font-size:11px;background:var(--orange-bg);color:var(--orange);padding:1px 7px;border-radius:20px}
 
 .main{flex:1;overflow-y:auto;padding:24px}
 
@@ -225,7 +224,6 @@ body{font-family:var(--font);background:var(--bg);color:var(--text-primary);min-
   <div class="nav-section">Viste</div>
   <div class="nav-item active" id="nav-oggi" onclick="showView('oggi')"><i class="ti ti-calendar-today"></i> Oggi</div>
   <div class="nav-item" id="nav-sedi" onclick="showView('sedi')"><i class="ti ti-building-warehouse"></i> Per sede</div>
-  <div class="nav-item" id="nav-ottimiz" onclick="showView('ottimiz')"><i class="ti ti-route"></i> Ottimizzazioni <span class="nav-badge" id="nav-badge" style="display:none">0</span></div>
   <div class="nav-item" id="nav-corriere" onclick="showView('corriere')"><i class="ti ti-truck-delivery"></i> Giro Corriere</div>
   <div class="nav-item" id="nav-tariffe" onclick="showView('tariffe')"><i class="ti ti-calculator"></i> Costo trasporto</div>
   <div class="nav-section">Gestione</div>
@@ -270,13 +268,6 @@ body{font-family:var(--font);background:var(--bg);color:var(--text-primary);min-
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:20px">Clicca su una sede per vedere i movimenti</div>
     <div class="sedi-grid" id="sedi-grid"></div>
     <div id="sede-detail"></div>
-  </div>
-
-  <!-- OTTIMIZZAZIONI -->
-  <div id="view-ottimiz" style="display:none">
-    <div style="font-size:22px;font-weight:600;margin-bottom:4px">Ottimizzazioni</div>
-    <div style="font-size:12px;color:var(--text-muted);margin-bottom:20px">Dove un mezzo rischia di viaggiare a vuoto: andata/ritorno e tratte da concatenare. Segna “gestito” quelle che hai sistemato.</div>
-    <div id="ottimiz-list"></div>
   </div>
 
   <!-- COSTO TRASPORTO (da listino) -->
@@ -603,25 +594,6 @@ function parseScadenza(txt){
   return `${a}-${String(me).padStart(2,'0')}-${String(g).padStart(2,'0')}`;
 }
 
-let ottGestite=JSON.parse(localStorage.getItem('locom_ott_gestite')||'{}');
-function detectOttimizzazioni(lista){
-  const sugg=[];
-  const valid=lista.filter(v=>v.from!=='??'&&v.to!=='??'&&v.from!==v.to);
-  for(let i=0;i<valid.length;i++){
-    for(let j=i+1;j<valid.length;j++){
-      const a=valid[i],b=valid[j];
-      if(a.calId!==b.calId) continue;                 // stessa flotta/calendario
-      let o=null;
-      if(a.from===b.to&&a.to===b.from) o={tipo:'ar',a,b};
-      else if(a.to===b.from) o={tipo:'concat',a,b};
-      else if(b.to===a.from) o={tipo:'concat',a:b,b:a};
-      if(o){ o.key=[a.id,b.id].sort().join('|'); if(!ottGestite[o.key]) sugg.push(o); }
-    }
-  }
-  return sugg;
-}
-function gestisciOtt(key){ ottGestite[key]=true; try{localStorage.setItem('locom_ott_gestite',JSON.stringify(ottGestite));}catch(e){} renderOttimiz(detectOttimizzazioni(viaggi)); renderToday(); }
-function ripristinaOtt(){ ottGestite={}; try{localStorage.setItem('locom_ott_gestite','{}');}catch(e){} renderOttimiz(detectOttimizzazioni(viaggi)); renderToday(); }
 
 // Comandi sui singoli viaggi (usati nelle Ottimizzazioni): scrivono su Google.
 function azioniViaggioHtml(v, uid){
@@ -717,19 +689,22 @@ function setSyncPill(state,text){
 
 // ── RENDER ──
 function renderToday(){
-  const ottimiz=detectOttimizzazioni(viaggi);
   const tot=viaggi.length,auth=viaggi.filter(v=>v.status==='autorizzato').length,
-        pend=viaggi.filter(v=>v.status==='pending').length,vuoto=ottimiz.filter(o=>o.tipo==='ar').length;
+        pend=viaggi.filter(v=>v.status==='pending').length;
+  // Coppie A/R nello stesso calendario (solo per il contatore "a vuoto evitabili")
+  let vuoto=0;
+  const valid=viaggi.filter(v=>v.from!=='??'&&v.to!=='??'&&v.from!==v.to);
+  for(let i=0;i<valid.length;i++)for(let j=i+1;j<valid.length;j++){
+    if(valid[i].calId===valid[j].calId&&valid[i].from===valid[j].to&&valid[i].to===valid[j].from)vuoto++;
+  }
   document.getElementById('kpi-tot').textContent=tot;
   document.getElementById('kpi-auth').textContent=auth;
   document.getElementById('kpi-pend').textContent=pend;
   document.getElementById('kpi-vuoto').textContent=vuoto;
   document.getElementById('viaggio-count').textContent=tot+' movimenti';
-  const badge=document.getElementById('nav-badge');
-  if(ottimiz.length){badge.style.display='inline';badge.textContent=ottimiz.length;}else{badge.style.display='none';}
   const alertBox=document.getElementById('alert-box');
   const errHtml=(window.__calErrori&&window.__calErrori.length)?`<div class="alert" style="background:var(--red-bg);color:var(--red);border:1px solid #fecaca"><i class="ti ti-alert-triangle"></i> Calendari non letti: ${window.__calErrori.join(', ')}</div>`:'';
-  alertBox.innerHTML=errHtml+(ottimiz.length?`<div class="alert alert-orange"><i class="ti ti-alert-triangle"></i> ${ottimiz.length} ottimizzazioni rilevate — vedi <strong>Ottimizzazioni</strong></div>`:tot>0?`<div class="alert alert-green"><i class="ti ti-check"></i> Nessun viaggio a vuoto rilevato</div>`:'');
+  alertBox.innerHTML=errHtml;
   const lista=document.getElementById('viaggio-list');
   if(!viaggi.length){lista.innerHTML='<div class="empty"><i class="ti ti-calendar"></i> Nessun viaggio per questo giorno</div>';return;}
   // Raggruppa per calendario (le flotte restano separate), nell'ordine di CAL_IDS.
@@ -748,11 +723,10 @@ function renderToday(){
         ${meta.sub?`<span style="font-size:11px;color:var(--text-muted)">${meta.sub}</span>`:''}
         <span style="margin-left:auto;font-size:11px;color:var(--text-secondary);background:var(--surface-2);border:1px solid var(--border);border-radius:20px;padding:1px 9px">${grp.length}</span>
       </div>
-      <div class="card">${grp.map(v=>renderViaggioCard(v,ottimiz)).join('')}</div>
+      <div class="card">${grp.map(v=>renderViaggioCard(v,[])).join('')}</div>
     </div>`;
   }
   lista.innerHTML=html;
-  renderOttimiz(ottimiz);
   renderSediGrid();
 }
 
@@ -848,42 +822,14 @@ function filterSede(code,el){
   document.querySelectorAll('.sede-card').forEach(c=>c.classList.remove('sel'));
   el.classList.add('sel');
   const filtered=viaggi.filter(v=>v.from===code||v.to===code);
-  const ottimiz=detectOttimizzazioni(filtered);
   const info=SEDI[code];
   document.getElementById('sede-detail').innerHTML=`
     <div style="font-size:14px;font-weight:600;margin:12px 0 10px;display:flex;align-items:center;gap:8px">
       <span class="sede-dot" style="background:${info.color}"></span>${info.label} — ${filtered.length} movimenti oggi
     </div>
-    <div class="card">${filtered.length?filtered.map(v=>renderViaggioCard(v,ottimiz)).join(''):'<div class="empty"><i class="ti ti-calendar"></i> Nessun movimento</div>'}</div>`;
+    <div class="card">${filtered.length?filtered.map(v=>renderViaggioCard(v,[])).join(''):'<div class="empty"><i class="ti ti-calendar"></i> Nessun movimento</div>'}</div>`;
 }
 
-function renderOttimiz(ottimiz){
-  const el=document.getElementById('ottimiz-list');
-  const haGestite=Object.keys(ottGestite).length>0;
-  if(!ottimiz||!ottimiz.length){
-    el.innerHTML='<div class="empty"><i class="ti ti-route"></i> Nessuna ottimizzazione da segnalare per questo giorno.</div>'+
-      (haGestite?'<div style="margin-top:12px"><button class="btn" style="padding:3px 10px;font-size:11px" onclick="ripristinaOtt()"><i class="ti ti-rotate"></i> Ripristina le segnalazioni gestite</button></div>':'');
-    return;
-  }
-  const rotta=v=>`${SEDI[v.from]?.label||v.from} → ${SEDI[v.to]?.label||v.to}`;
-  const merce=v=>(v.merce||v.summary||'').toString();
-  el.innerHTML=ottimiz.map(o=>{
-    const cal=calMeta(o.a.calId).label;
-    const testo = o.tipo==='ar'
-      ? `Un mezzo può fare <b>${rotta(o.a)}</b> e al ritorno <b>${rotta(o.b)}</b> con un carico, invece di rientrare a vuoto.`
-      : `Dopo <b>${rotta(o.a)}</b> si può proseguire con <b>${rotta(o.b)}</b> senza rientrare in sede in mezzo.`;
-    const uidA=(o.key+'-a').replace(/[^a-zA-Z0-9]/g,'_');
-    const uidB=(o.key+'-b').replace(/[^a-zA-Z0-9]/g,'_');
-    return `<div class="ott-card">
-      <div class="ott-title"><i class="ti ti-${o.tipo==='ar'?'arrows-exchange':'route'}"></i> ${o.tipo==='ar'?'Ritorno a vuoto evitabile':'Tratte da concatenare'} <span style="font-weight:400;color:var(--text-muted);font-size:11px">· ${cal}</span></div>
-      <div class="ott-desc">${testo}</div>
-      ${azioniViaggioHtml(o.a,uidA)}
-      ${azioniViaggioHtml(o.b,uidB)}
-      <button class="btn" style="padding:3px 10px;font-size:11px;margin-top:10px" onclick="gestisciOtt('${o.key}')"><i class="ti ti-check"></i> Segna come gestito</button>
-    </div>`;
-  }).join('');
-  if(haGestite) el.innerHTML+='<div style="margin-top:12px"><button class="btn" style="padding:3px 10px;font-size:11px" onclick="ripristinaOtt()"><i class="ti ti-rotate"></i> Ripristina le segnalazioni gestite</button></div>';
-}
 
 function renderAutomezzi(){
   if(!automezzi.length){
@@ -1056,7 +1002,7 @@ async function eliminaViaggio(eventId,eid){
 function changeDay(delta){currentDay+=delta;loadDay();}
 
 function showView(name){
-  ['oggi','sedi','ottimiz','corriere','tariffe','nuovo','automezzi'].forEach(v=>{
+  ['oggi','sedi','corriere','tariffe','nuovo','automezzi'].forEach(v=>{
     const el=document.getElementById('view-'+v); if(el) el.style.display=v===name?'':'none';
     const nav=document.getElementById('nav-'+v);
     if(nav) nav.classList.toggle('active',v===name);
@@ -1064,7 +1010,6 @@ function showView(name){
   if(name==='automezzi') renderAutomezzi();
   if(name==='nuovo') populateNuovoForm();
   if(name==='sedi'){renderSediGrid();document.getElementById('sede-detail').innerHTML='';}
-  if(name==='ottimiz') renderOttimiz(detectOttimizzazioni(viaggi));
   if(name==='corriere') renderCorriere();
 }
 

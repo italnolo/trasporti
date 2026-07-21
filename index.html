@@ -1335,13 +1335,19 @@ async function autorizzaGiroSedi(){
   // Uso l'ordine deciso nella pre-stampa (frecce su/giù), non quello calcolato.
   const targets=ordineCorrente(idsGiroCorriere(plan));
   if(!targets.length){ alert('Nel giro non ci sono viaggi del Corriere a cui dare un orario. Controlla di aver preparato il giro con dei viaggi del Corriere.'); return; }
-  if(!confirm(`Stai per dare un orario a ${targets.length} viaggi del giro di oggi: blocchi da 30 minuti a partire dalle 07:30, in ordine cronologico.\n\nVengono spostati da "tutto il giorno" a orario sul calendario Corriere (lo vedono tutte le sedi). Confermi?`)) return;
+  const orari=targets.map((id,i)=>oraDi(id,i));
+  if(!confirm(`Stai per dare l'orario a ${targets.length} viaggi del giro di oggi, come impostato in "Ordine di stampa": dalle ${orari[0]} alle ${orari[orari.length-1]}.\n\nVengono spostati da "tutto il giorno" a orario sul calendario Corriere (lo vedono tutte le sedi). Confermi?`)) return;
   const ds=corrDayKey(0);
+  const min=t=>{const [h,m]=t.split(':').map(Number);return h*60+m;};
+  const hhmm=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
   let ok=0; const errs=[];
   for(let i=0;i<targets.length;i++){
-    const [h,mi]=oraDi(targets[i],i).split(':').map(Number);
-    const s=h*60+mi, e=Math.min(23*60+59,s+30);
-    const hhmm=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
+    const s=min(orari[i]);
+    // il blocco dura fino al viaggio successivo (max 30 min), così non si accavallano
+    const succ=(i+1<orari.length)?min(orari[i+1]):null;
+    let e=s+30;
+    if(succ!==null && succ>s && succ<s+30) e=succ;
+    e=Math.min(23*60+59,e);
     try{
       // date:null forza Google a togliere il "tutto il giorno" e passare all'orario
       await apiPatchEvent(CORRIERE_CAL, targets[i], {

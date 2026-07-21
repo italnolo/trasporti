@@ -606,6 +606,15 @@ function spostaOra(id,i,delta){
 }
 function resetOrari(){ delete orariStampa[corrDayKey(0)]; saveGiroState(); renderCorriere(); }
 
+// ── Già caricato ieri sera: oggi il collo parte a bordo (nessun ritiro) ──
+let giaCarico={};
+function giaCaricato(id){ const d=giaCarico[corrDayKey(0)]; return !!(d&&d[id]); }
+function toggleGiaCaricato(id){
+  const k=corrDayKey(0); giaCarico[k]=giaCarico[k]||{};
+  if(giaCarico[k][id]) delete giaCarico[k][id]; else giaCarico[k][id]=true;
+  saveGiroState(); renderCorriere();
+}
+
 // Tipologie di evento: divide i viaggi dalle altre attività (assenze, tagliandi, montaggi…).
 const TIPI={
   viaggio:     {label:'Viaggio',              color:'#1a56db', icon:'ti-truck'},
@@ -1531,16 +1540,19 @@ function renderCorriere(){
   }
 
   // colli odierni: stato e sede di carico effettiva
-  const colli=oggiItems.map(it=>{
+  const colliTutti=oggiItems.map(it=>{
     const stato=statoCollo(it.id);
     const from=pickupCollo(it.id)||it.from;
     return {id:it.id, from, fromOrig:it.from, to:it.to, label:it.label, stato, deliver:(stato==='giro'), carried:false, pren:it.pren, rb:!!it.rb};
   });
-  // colli GIÀ a bordo da ieri
+  // Segnati "già caricato ieri": oggi partono a bordo, si scaricano e basta.
+  const colli=colliTutti.filter(c=>!giaCaricato(c.id));
+  const colliPreCaricati=colliTutti.filter(c=>giaCaricato(c.id)).map(c=>({...c, carried:true, gia:true}));
+  // colli GIÀ a bordo da ieri (rimasti sul camion) + quelli caricati ieri sera
   const colliCarried=carried.map(it=>{
     const stato=statoCollo(it.id);
     return {id:it.id, from:it.from, fromOrig:it.from, to:it.to, label:it.label, stato, deliver:(stato==='giro'), carried:true, pren:prenDi(it.id,it.label)};
-  });
+  }).concat(colliPreCaricati);
   const inGiroTodayAll=colli.filter(c=>c.stato!=='tolto');
   const carriedActive=colliCarried.filter(c=>c.stato!=='tolto');
   const seqFissa=giroSeq();
@@ -1639,60 +1651,6 @@ function renderCorriere(){
 
 
 
-  html+=`<div class="card" style="margin-top:4px"><div class="card-header"><span class="card-title">${usaMisura?'Giro su misura (i tuoi selezionati)':usaFisso?'Percorso fisso (ordine scelto)':'Percorso ottimizzato'} — cosa carica e cosa scarica</span></div>`;
-  plan.seq.forEach((s,i)=>{
-    const meta=SEDI[s.code]||{label:s.code,color:'#888'};
-    const tag = s.start?'<span class="tag" style="background:var(--surface-2);color:var(--text-secondary)">partenza</span>'
-             : s.rientro?'<span class="tag" style="background:var(--surface-2);color:var(--text-secondary)">rientro</span>':'';
-    html+=`<div class="viaggio" style="border-left-color:${meta.color};cursor:default">
-      <div class="v-top">
-        <span class="v-time">${i}.</span>
-        <span class="v-route"><span style="color:${meta.color};font-weight:600">${meta.label}</span> ${tag}</span>
-        ${s.km?`<span style="margin-left:auto;font-size:11px;color:var(--text-muted)">${s.km} km · ${fmtMin(s.min)}</span>`:''}
-      </div>`;
-    if(s.scarica&&s.scarica.length) html+=`<div style="font-size:12px;color:var(--red);padding-left:62px;margin-top:4px"><i class="ti ti-arrow-down"></i> Scarica: ${s.scarica.map(x=>x.label).join(' · ')}</div>`;
-    if(s.carica&&s.carica.length) html+=`<div style="font-size:12px;color:var(--green);padding-left:62px;margin-top:4px"><i class="ti ti-arrow-up"></i> Carica: ${s.carica.map(x=>x.label).join(' · ')}</div>`;
-    if(s.start&&s.preloaded&&s.preloaded.length) html+=`<div style="font-size:12px;color:var(--accent);padding-left:62px;margin-top:4px"><i class="ti ti-package-import"></i> Già a bordo da ieri: ${s.preloaded.map(x=>`${x.label} (→${SEDI[x.to]?.label||x.to})`).join(' · ')}</div>`;
-    if(!s.start&&!s.rientro) html+=`<div style="font-size:11px;color:var(--text-muted);padding-left:62px;margin-top:4px"><i class="ti ti-package"></i> A bordo: ${s.onboardAfter.length?s.onboardAfter.map(x=>`${x.label} (→${SEDI[x.to]?.label||x.to})`).join(' · '):'vuoto'}</div>`;
-    if(s.rientro&&plan.restano.length) html+=`<div style="font-size:12px;color:var(--orange);padding-left:62px;margin-top:4px"><i class="ti ti-arrow-right-bar"></i> Resta a bordo → trasferito al giro di domani: ${plan.restano.map(x=>`${x.label} (→${SEDI[x.to]?.label||x.to})`).join(' · ')}</div>`;
-    html+='</div>';
-  });
-  html+='</div>';
-
-  // ── Pre-stampa: l'ordine con cui Franco vuole girare (riordinabile) ──
-  const idsPiano=idsGiroCorriere(plan);
-  const ordine=ordineCorrente(idsPiano);
-  if(ordine.length){
-    html+='<div class="card" style="margin-top:12px"><div class="card-header"><span class="card-title"><i class="ti ti-list-numbers"></i> Ordine di stampa e autorizzazione</span>'+
-      `<div style="display:flex;gap:4px"><button class="btn" style="padding:2px 10px;font-size:11px" onclick="resetOrari()"><i class="ti ti-clock"></i> Orari automatici</button><button class="btn" style="padding:2px 10px;font-size:11px" onclick="resetOrdine()"><i class="ti ti-rotate"></i> Ordine del giro</button></div></div>`+
-      '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">Ultimo passaggio: sistema ordine e orari, poi <b>Stampa piano</b> per controllare e <b>Autorizza giro sedi</b> per scrivere gli orari sul calendario.</div>';
-    ordine.forEach((id,i)=>{
-      const v=viaggi.find(x=>x.id===id); if(!v) return;
-      const d=descCompleta(v.summary,v.from,v.to)||v.merce||'(materiale)';
-      const coda=codaDnRb(v.summary);
-      html+=`<div class="viaggio" style="cursor:default">
-        <div class="v-top" style="flex-wrap:nowrap;gap:8px;align-items:flex-start">
-          <span style="display:flex;align-items:center;gap:2px;flex-shrink:0">
-            <button class="btn" title="mezz'ora prima" style="padding:2px 7px;font-size:13px;line-height:1.1" onclick="spostaOra('${id}',${i},-30)">−</button>
-            <input type="time" step="1800" value="${oraDi(id,i)}" onchange="setOra('${id}',this.value)" style="width:92px;font-family:monospace;font-weight:700;color:var(--accent);font-size:13px;padding:4px 6px;border:1px solid var(--border);border-radius:7px;background:var(--surface)">
-            <button class="btn" title="mezz'ora dopo" style="padding:2px 7px;font-size:13px;line-height:1.1" onclick="spostaOra('${id}',${i},30)">+</button>
-          </span>
-          <span style="flex:1 1 auto;min-width:0">
-            <span style="font-size:12px;color:var(--text-muted)">${SEDI[v.from]?.label||v.from} <i class="ti ti-arrow-right" style="font-size:11px"></i> ${SEDI[v.to]?.label||v.to}</span><br>
-            <span style="font-size:13.5px;font-weight:600;word-break:break-word">${d}</span>
-            ${coda?`<span class="tag" style="background:var(--surface-2);color:var(--text-secondary);font-size:10px;margin-left:6px">${coda}</span>`:''}
-          </span>
-          <span style="display:flex;flex-direction:column;gap:2px;flex-shrink:0">
-            <button class="btn" style="padding:1px 8px;font-size:12px;line-height:1.2" onclick="spostaOrdine('${id}',-1)" ${i===0?'disabled':''}>▲</button>
-            <button class="btn" style="padding:1px 8px;font-size:12px;line-height:1.2" onclick="spostaOrdine('${id}',1)" ${i===ordine.length-1?'disabled':''}>▼</button>
-          </span>
-        </div>
-      </div>`;
-    });
-    html+='</div>';
-  }
-  html+='<div class="card" style="margin-top:12px"><div class="card-header"><span class="card-title">Mappa del giro</span><span style="font-size:11px;color:var(--text-muted)">tracciato indicativo · OpenStreetMap</span></div><div id="corr-map" style="height:340px;width:100%"></div></div>';
-
   html+='<div class="card" style="margin-top:12px"><div class="card-header"><span class="card-title">Carichi del Corriere — modifica il giro</span></div>';
   colliCarried.concat(colli.filter(c=>!fuoriSet.has(c.id))).forEach(c=>{
     const eid=c.id.replace(/[^a-zA-Z0-9]/g,'_');
@@ -1700,9 +1658,9 @@ function renderCorriere(){
     const sostituita=(c.from!==c.fromOrig);
     const seg=(s,lbl)=>`<button class="btn ${c.stato===s?'primary':''}" style="padding:3px 9px;font-size:11px" onclick="setColloStato('${c.id}','${s}')">${lbl}</button>`;
     const bordoLbl=c.carried?'Ancora a bordo':'Tieni a bordo';
-    const prenBtn=`<button class="btn" style="padding:3px 8px;font-size:11px;${c.pren?'color:#b45309;font-weight:600':''}" onclick="togglePrenotato('${c.id}','${(c.label||'').replace(/'/g,'')}')" title="Prenotazione/noleggio dietro a questo collo">${c.pren?'★ Prenotato':'☆ Prenota'}</button>`;
+    const giaBtn=c.carried&&!c.gia?'':`<button class="btn ${c.gia?'primary':''}" style="padding:3px 8px;font-size:11px" onclick="toggleGiaCaricato('${c.id}')" title="L'ho caricato ieri sera: oggi parte già a bordo e va solo scaricato">${c.gia?'✓ Caricato ieri':'Già caricato ieri'}</button>`;
     const riga2 = c.carried
-      ? `<span class="tag" style="background:var(--accent-light);color:var(--accent)">già a bordo da ieri</span>`
+      ? `<span class="tag" style="background:var(--accent-light);color:var(--accent)">${c.gia?'caricato ieri sera · parte a bordo':'già a bordo da ieri'}</span>`
       : `<span>Carica da</span><select onchange="setColloPickup('${c.id}',this.value)" style="font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text-primary)">${pickOpts}</select>${sostituita?`<span class="tag" style="background:var(--orange-bg);color:var(--orange)">richiesta a ${SEDI[c.fromOrig]?.label||c.fromOrig}</span>`:''}`;
     const spostaHtml = c.carried ? '' : `
       <div style="margin-top:8px">
@@ -1716,7 +1674,7 @@ function renderCorriere(){
     html+=`<div class="viaggio" style="cursor:default;${c.stato==='tolto'?'opacity:.5':''}">
       <div class="v-top" style="flex-wrap:wrap;gap:8px">
         <span class="v-route" style="flex:1 1 200px">${c.carried?'<i class="ti ti-package-import" style="color:var(--accent)"></i> ':''}${c.pren?'<span style="color:#b45309">★</span> ':''}${c.rb?'<span class="tag" style="background:var(--surface-2);color:var(--text-secondary);font-size:10px">RB</span> ':''}${c.label}</span>
-        <div style="display:flex;gap:4px">${prenBtn}${seg('giro','In giro')}${seg('bordo',bordoLbl)}${seg('tolto','Togli')}</div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap">${giaBtn}${seg('giro','In giro')}${seg('bordo',bordoLbl)}${seg('tolto','Togli')}</div>
       </div>
       <div style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12px;color:var(--text-secondary);flex-wrap:wrap">
         ${riga2}
@@ -1792,12 +1750,65 @@ function renderCorriere(){
     html+='</div>';
   }
 
+  // ── Pre-stampa: l'ordine con cui Franco vuole girare (riordinabile) ──
+  const idsPiano=idsGiroCorriere(plan);
+  const ordine=ordineCorrente(idsPiano);
+  if(ordine.length){
+    html+='<div class="card" style="margin-top:12px"><div class="card-header"><span class="card-title"><i class="ti ti-list-numbers"></i> Ordine di stampa e autorizzazione</span>'+
+      `<div style="display:flex;gap:4px"><button class="btn" style="padding:2px 10px;font-size:11px" onclick="resetOrari()"><i class="ti ti-clock"></i> Orari automatici</button><button class="btn" style="padding:2px 10px;font-size:11px" onclick="resetOrdine()"><i class="ti ti-rotate"></i> Ordine del giro</button></div></div>`+
+      '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">Ultimo passaggio: sistema ordine e orari, poi <b>Stampa piano</b> per controllare e <b>Autorizza giro sedi</b> per scrivere gli orari sul calendario.</div>';
+    ordine.forEach((id,i)=>{
+      const v=viaggi.find(x=>x.id===id); if(!v) return;
+      const d=descCompleta(v.summary,v.from,v.to)||v.merce||'(materiale)';
+      const coda=codaDnRb(v.summary);
+      html+=`<div class="viaggio" style="cursor:default">
+        <div class="v-top" style="flex-wrap:nowrap;gap:8px;align-items:flex-start">
+          <span style="display:flex;align-items:center;gap:2px;flex-shrink:0">
+            <button class="btn" title="mezz'ora prima" style="padding:2px 7px;font-size:13px;line-height:1.1" onclick="spostaOra('${id}',${i},-30)">−</button>
+            <input type="time" step="1800" value="${oraDi(id,i)}" onchange="setOra('${id}',this.value)" style="width:92px;font-family:monospace;font-weight:700;color:var(--accent);font-size:13px;padding:4px 6px;border:1px solid var(--border);border-radius:7px;background:var(--surface)">
+            <button class="btn" title="mezz'ora dopo" style="padding:2px 7px;font-size:13px;line-height:1.1" onclick="spostaOra('${id}',${i},30)">+</button>
+          </span>
+          <span style="flex:1 1 auto;min-width:0">
+            <span style="font-size:12px;color:var(--text-muted)">${SEDI[v.from]?.label||v.from} <i class="ti ti-arrow-right" style="font-size:11px"></i> ${SEDI[v.to]?.label||v.to}</span><br>
+            <span style="font-size:13.5px;font-weight:600;word-break:break-word">${d}</span>
+            ${coda?`<span class="tag" style="background:var(--surface-2);color:var(--text-secondary);font-size:10px;margin-left:6px">${coda}</span>`:''}
+          </span>
+          <span style="display:flex;flex-direction:column;gap:2px;flex-shrink:0">
+            <button class="btn" style="padding:1px 8px;font-size:12px;line-height:1.2" onclick="spostaOrdine('${id}',-1)" ${i===0?'disabled':''}>▲</button>
+            <button class="btn" style="padding:1px 8px;font-size:12px;line-height:1.2" onclick="spostaOrdine('${id}',1)" ${i===ordine.length-1?'disabled':''}>▼</button>
+          </span>
+        </div>
+      </div>`;
+    });
+    html+='</div>';
+  }
+  html+=`<div class="card" style="margin-top:4px"><div class="card-header"><span class="card-title">${usaMisura?'Giro su misura (i tuoi selezionati)':usaFisso?'Percorso fisso (ordine scelto)':'Percorso ottimizzato'} — cosa carica e cosa scarica</span></div>`;
+  plan.seq.forEach((s,i)=>{
+    const meta=SEDI[s.code]||{label:s.code,color:'#888'};
+    const tag = s.start?'<span class="tag" style="background:var(--surface-2);color:var(--text-secondary)">partenza</span>'
+             : s.rientro?'<span class="tag" style="background:var(--surface-2);color:var(--text-secondary)">rientro</span>':'';
+    html+=`<div class="viaggio" style="border-left-color:${meta.color};cursor:default">
+      <div class="v-top">
+        <span class="v-time">${i}.</span>
+        <span class="v-route"><span style="color:${meta.color};font-weight:600">${meta.label}</span> ${tag}</span>
+        ${s.km?`<span style="margin-left:auto;font-size:11px;color:var(--text-muted)">${s.km} km · ${fmtMin(s.min)}</span>`:''}
+      </div>`;
+    if(s.scarica&&s.scarica.length) html+=`<div style="font-size:12px;color:var(--red);padding-left:62px;margin-top:4px"><i class="ti ti-arrow-down"></i> Scarica: ${s.scarica.map(x=>x.label).join(' · ')}</div>`;
+    if(s.carica&&s.carica.length) html+=`<div style="font-size:12px;color:var(--green);padding-left:62px;margin-top:4px"><i class="ti ti-arrow-up"></i> Carica: ${s.carica.map(x=>x.label).join(' · ')}</div>`;
+    if(s.start&&s.preloaded&&s.preloaded.length) html+=`<div style="font-size:12px;color:var(--accent);padding-left:62px;margin-top:4px"><i class="ti ti-package-import"></i> Già a bordo da ieri: ${s.preloaded.map(x=>`${x.label} (→${SEDI[x.to]?.label||x.to})`).join(' · ')}</div>`;
+    if(!s.start&&!s.rientro) html+=`<div style="font-size:11px;color:var(--text-muted);padding-left:62px;margin-top:4px"><i class="ti ti-package"></i> A bordo: ${s.onboardAfter.length?s.onboardAfter.map(x=>`${x.label} (→${SEDI[x.to]?.label||x.to})`).join(' · '):'vuoto'}</div>`;
+    if(s.rientro&&plan.restano.length) html+=`<div style="font-size:12px;color:var(--orange);padding-left:62px;margin-top:4px"><i class="ti ti-arrow-right-bar"></i> Resta a bordo → trasferito al giro di domani: ${plan.restano.map(x=>`${x.label} (→${SEDI[x.to]?.label||x.to})`).join(' · ')}</div>`;
+    html+='</div>';
+  });
+  html+='</div>';
+
+  html+='<div class="card" style="margin-top:12px"><div class="card-header"><span class="card-title">Mappa del giro</span><span style="font-size:11px;color:var(--text-muted)">tracciato indicativo · OpenStreetMap</span></div><div id="corr-map" style="height:340px;width:100%"></div></div>';
   body.innerHTML=html;
   disegnaMappaCorriere(plan);
   saveGiroState();
 }
-function saveGiroState(){ try{ localStorage.setItem('locom_giro_state', JSON.stringify({stato:corriereStato,pickup:corrierePickup,flex:corriereFlex,modo:corriereModo,fisso:corriereGiroFisso,sedi:corriereSedi,misura:giroMisura,ordine:ordineStampa,orari:orariStampa})); }catch(e){} }
-function loadGiroState(){ try{ const s=JSON.parse(localStorage.getItem('locom_giro_state')||'{}'); if(s.stato)corriereStato=s.stato; if(s.pickup)corrierePickup=s.pickup; if(s.flex)corriereFlex=s.flex; if(s.modo)corriereModo=s.modo; if(s.fisso)corriereGiroFisso=s.fisso; if(s.sedi)corriereSedi=s.sedi; if(s.misura)giroMisura=s.misura; if(s.ordine)ordineStampa=s.ordine; if(s.orari)orariStampa=s.orari; }catch(e){} }
+function saveGiroState(){ try{ localStorage.setItem('locom_giro_state', JSON.stringify({stato:corriereStato,pickup:corrierePickup,flex:corriereFlex,modo:corriereModo,fisso:corriereGiroFisso,sedi:corriereSedi,misura:giroMisura,ordine:ordineStampa,orari:orariStampa,gia:giaCarico})); }catch(e){} }
+function loadGiroState(){ try{ const s=JSON.parse(localStorage.getItem('locom_giro_state')||'{}'); if(s.stato)corriereStato=s.stato; if(s.pickup)corrierePickup=s.pickup; if(s.flex)corriereFlex=s.flex; if(s.modo)corriereModo=s.modo; if(s.fisso)corriereGiroFisso=s.fisso; if(s.sedi)corriereSedi=s.sedi; if(s.misura)giroMisura=s.misura; if(s.ordine)ordineStampa=s.ordine; if(s.orari)orariStampa=s.orari; if(s.gia)giaCarico=s.gia; }catch(e){} }
 loadGiroState();
 
 function disegnaMappaCorriere(plan){

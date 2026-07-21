@@ -323,8 +323,8 @@ body{font-family:var(--font);background:var(--bg);color:var(--text-primary);min-
       <label style="font-size:12px;color:var(--text-muted)">Base di Franco</label>
       <select id="corr-base" onchange="setCorriereBase(this.value)" style="font-size:13px;padding:7px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text-primary);font-family:var(--font)"></select>
       <span style="font-size:11px;color:var(--text-muted)">parte e rientra qui</span>
-      <button class="btn success" style="margin-left:auto" onclick="autorizzaGiroSedi()"><i class="ti ti-clock-check"></i> Autorizza giro sedi »</button>
-      <button class="btn" onclick="stampaPiano()"><i class="ti ti-printer"></i> Stampa piano</button>
+      <button class="btn" style="margin-left:auto" onclick="stampaPiano()"><i class="ti ti-printer"></i> Stampa piano</button>
+      <button class="btn success" onclick="autorizzaGiroSedi()"><i class="ti ti-clock-check"></i> Autorizza giro sedi »</button>
     </div>
     <div id="corr-body"><div class="loading-row"><span class="spinner"></span> Carico...</div></div>
   </div>
@@ -457,6 +457,23 @@ function saveAutomezzi(){localStorage.setItem('locom_automezzi',JSON.stringify(a
 // ── GOOGLE AUTH ──
 let tokenClient;
 window.onload = function() {
+  avviaQuandoGooglePronto(0);
+};
+// La libreria di Google si carica in modo asincrono: se non è ancora pronta
+// aspetto e riprovo, invece di andare in errore.
+function avviaQuandoGooglePronto(tentativo){
+  if(typeof google!=='undefined' && google.accounts && google.accounts.oauth2){
+    try{ initGoogle(); }
+    catch(e){ showLoginError('Errore di avvio: '+e.message); }
+    return;
+  }
+  if(tentativo>40){   // ~10 secondi
+    showLoginError('Non riesco a caricare il servizio di accesso Google. Controlla la connessione e ricarica la pagina (se sei su rete aziendale, potrebbe essere bloccato accounts.google.com).');
+    return;
+  }
+  setTimeout(function(){ avviaQuandoGooglePronto(tentativo+1); }, 250);
+}
+function initGoogle() {
   // Inizializza Google Identity Services
   google.accounts.id.initialize({
     client_id: CLIENT_ID,
@@ -487,7 +504,7 @@ window.onload = function() {
     document.getElementById('login-screen').style.display = 'none';
     loadDay();
   }
-};
+}
 
 function handleCredential(response) {
   // Con One Tap otteniamo id_token ma non access_token — chiediamo token OAuth
@@ -578,6 +595,16 @@ function spostaOrdine(id,dir){
 }
 function resetOrdine(){ delete ordineStampa[corrDayKey(0)]; saveGiroState(); renderCorriere(); }
 function oraSlot(i){ const m=7*60+30+i*30; return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0'); }
+// Orario scelto a mano (se c'è), altrimenti quello automatico in base alla posizione.
+let orariStampa={};
+function oraDi(id,i){ const d=orariStampa[corrDayKey(0)]; return (d&&d[id])||oraSlot(i); }
+function setOra(id,val){ if(!val) return; const k=corrDayKey(0); (orariStampa[k]=orariStampa[k]||{})[id]=val; saveGiroState(); renderCorriere(); }
+function spostaOra(id,i,delta){
+  const [h,m]=oraDi(id,i).split(':').map(Number);
+  let t=Math.max(0,Math.min(23*60+30,h*60+m+delta));
+  setOra(id,String(Math.floor(t/60)).padStart(2,'0')+':'+String(t%60).padStart(2,'0'));
+}
+function resetOrari(){ delete orariStampa[corrDayKey(0)]; saveGiroState(); renderCorriere(); }
 
 // Tipologie di evento: divide i viaggi dalle altre attività (assenze, tagliandi, montaggi…).
 const TIPI={
@@ -1109,7 +1136,7 @@ function fmtMin(m){const h=Math.floor(m/60),mm=m%60;return h?`${h}h ${mm}′`:`$
 
 function corriereItems(){
   return viaggi.filter(v=>v.calId==='corrierelocom@gmail.com' && v.from!=='??' && v.to!=='??' && v.from!==v.to)
-    .map(v=>({id:v.id, from:v.from, to:v.to, label:v.merce||v.summary||'(materiale)',
+    .map(v=>({id:v.id, from:v.from, to:v.to, label:descCompleta(v.summary,v.from,v.to)||v.merce||v.summary||'(materiale)',
               finestra:!!v.finestra, giorniFinestra:v.giorniFinestra||1, endDate:v.endDate||'', scadenza:v.scadenza||'',
               pren:prenDi(v.id,(v.summary||'')+' '+(v.note||'')),
               rb:/\bRB\b/i.test(v.summary||'')}));
@@ -1301,10 +1328,11 @@ async function autorizzaGiroSedi(){
   if(!targets.length){ alert('Nel giro non ci sono viaggi del Corriere a cui dare un orario. Controlla di aver preparato il giro con dei viaggi del Corriere.'); return; }
   if(!confirm(`Stai per dare un orario a ${targets.length} viaggi del giro di oggi: blocchi da 30 minuti a partire dalle 07:30, in ordine cronologico.\n\nVengono spostati da "tutto il giorno" a orario sul calendario Corriere (lo vedono tutte le sedi). Confermi?`)) return;
   const ds=corrDayKey(0);
-  const hhmm=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
   let ok=0; const errs=[];
   for(let i=0;i<targets.length;i++){
-    const s=7*60+30+i*30, e=s+30;
+    const [h,mi]=oraDi(targets[i],i).split(':').map(Number);
+    const s=h*60+mi, e=Math.min(23*60+59,s+30);
+    const hhmm=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
     try{
       // date:null forza Google a togliere il "tutto il giorno" e passare all'orario
       await apiPatchEvent(CORRIERE_CAL, targets[i], {
@@ -1367,36 +1395,31 @@ function stampaPiano(){
   const p=corriereLastPlan, m=corriereLastMeta;
   const [y,mo,d]=m.data.split('-'); const dataFmt=`${d}/${mo}/${y}`;
   const ordine=ordineCorrente(idsGiroCorriere(p));
+  const oraDel={}; ordine.forEach((id,i)=>{ oraDel[id]=oraDi(id,i); });
+  const et=x=>(x.pren?'★ ':'')+(oraDel[x.id]?oraDel[x.id]+' ':'')+x.label;
   let h=`<div class="pt-title">Piano viaggi Corriere — Franco</div>
-    <div class="pt-sub">Giornata ${dataFmt} · base ${SEDI[m.base]?.label||m.base} · ${p.totKm} km stimati · ${fmtMin(p.totMin)} di guida · ${ordine.length} viaggi</div>`;
-  // Elenco cronologico nell'ordine deciso, con la descrizione COMPLETA
-  h+=`<table class="pt"><thead><tr><th style="width:52px">Ora</th><th style="width:112px">Da → A</th><th>Articolo e accessori</th><th style="width:60px">DN/RB</th><th style="width:34px">Fatto</th></tr></thead><tbody>`;
-  ordine.forEach((id,i)=>{
-    const v=viaggi.find(x=>x.id===id); if(!v) return;
-    const desc=descCompleta(v.summary,v.from,v.to)||v.merce||'(materiale)';
-    const coda=codaDnRb(v.summary);
-    const pren=prenDi(v.id,(v.summary||'')+' '+(v.note||''));
-    h+=`<tr>
-      <td class="pt-ora">${oraSlot(i)}</td>
-      <td>${SEDI[v.from]?.label||v.from} → ${SEDI[v.to]?.label||v.to}</td>
-      <td class="pt-desc">${pren?'★ ':''}${desc}</td>
-      <td>${coda}</td>
-      <td><span class="pt-ck"></span></td>
-    </tr>`;
+    <div class="pt-sub">Giornata ${dataFmt} · base ${SEDI[m.base]?.label||m.base} · ${p.totKm} km stimati · ${fmtMin(p.totMin)} di guida · ${m.nColli} colli</div>
+    ${m.sediTxt&&m.sediTxt!=='tutte'?`<div class="pt-sub" style="margin-top:-6px">Tappe: ${m.sediTxt}</div>`:''}
+    <table class="pt"><thead><tr><th style="width:26px">#</th><th style="width:96px">Sede</th><th>Scarica</th><th>Carica</th><th>A bordo dopo</th><th style="width:38px">km</th><th style="width:30px">✓</th></tr></thead><tbody>`;
+  p.seq.forEach((s,i)=>{
+    const nome=SEDI[s.code]?.label||s.code;
+    const tag=s.start?' (partenza)':s.rientro?' (rientro)':'';
+    const sc=(s.scarica||[]).map(et).join('<br>')||'—';
+    const ca=[...(s.preloaded||[]).map(x=>et(x)+' [da ieri]'),...(s.carica||[]).map(et)].join('<br>')||'—';
+    const ab=(s.onboardAfter||[]).map(x=>`${x.label} → ${SEDI[x.to]?.label||x.to}`).join('<br>')||'vuoto';
+    h+=`<tr><td>${i}</td><td><b>${nome}</b>${tag}</td><td class="pt-desc">${sc}</td><td class="pt-desc">${ca}</td><td class="pt-desc">${ab}</td><td>${s.km?s.km:''}</td><td><span class="pt-ck"></span></td></tr>`;
   });
   h+='</tbody></table>';
-  if(p.restano&&p.restano.length) h+=`<div class="pt-note">Resta a bordo per il giorno dopo: ${p.restano.map(x=>x.label+' → '+(SEDI[x.to]?.label||x.to)).join(', ')}</div>`;
+  if(p.restano&&p.restano.length) h+=`<div class="pt-note">Resta a bordo per il giorno dopo: ${p.restano.map(x=>x.label+' → '+(SEDI[x.to]?.label||x.to)).join(' · ')}</div>`;
   if(corriereLastFuori&&corriereLastFuori.length){
     h+=`<div class="pt-note" style="margin-top:14px">Restano fuori (da spostare ad altro giorno):</div>
-      <table class="pt"><thead><tr><th style="width:112px">Da → A</th><th>Articolo e accessori</th></tr></thead><tbody>`;
+      <table class="pt"><thead><tr><th style="width:130px">Da → A</th><th>Articolo e accessori</th></tr></thead><tbody>`;
     corriereLastFuori.forEach(c=>{
-      const v=viaggi.find(x=>x.id===c.id);
-      const desc=v?(descCompleta(v.summary,v.from,v.to)||c.label):c.label;
-      h+=`<tr><td>${SEDI[c.from]?.label||c.from} → ${SEDI[c.to]?.label||c.to}</td><td class="pt-desc">${desc}</td></tr>`;
+      h+=`<tr><td>${SEDI[c.from]?.label||c.from} → ${SEDI[c.to]?.label||c.to}</td><td class="pt-desc">${c.label}</td></tr>`;
     });
     h+='</tbody></table>';
   }
-  h+=`<div class="pt-foot">Lo.Com — foglio di viaggio Corriere · orari indicativi a blocchi di 30 minuti</div>`;
+  h+=`<div class="pt-foot">Lo.Com — foglio di viaggio Corriere · orari indicativi · distanze stimate</div>`;
   document.getElementById('print-area').innerHTML=h;
   window.print();
 }
@@ -1615,34 +1638,6 @@ function renderCorriere(){
   html+='</div>';
 
 
-  // ── Pre-stampa: l'ordine con cui Franco vuole girare (riordinabile) ──
-  const idsPiano=idsGiroCorriere(plan);
-  const ordine=ordineCorrente(idsPiano);
-  if(ordine.length){
-    html+='<div class="card" style="margin-top:12px"><div class="card-header"><span class="card-title"><i class="ti ti-list-numbers"></i> Ordine di stampa e autorizzazione</span>'+
-      `<button class="btn" style="padding:2px 10px;font-size:11px" onclick="resetOrdine()"><i class="ti ti-rotate"></i> Rimetti ordine del giro</button></div>`+
-      '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">Sposta i viaggi con le frecce fino ad avere il giro come lo vuoi fare. Gli orari qui sotto sono quelli che verranno scritti sul calendario quando premi <b>Autorizza giro sedi</b>, e sono l\'ordine della stampa.</div>';
-    ordine.forEach((id,i)=>{
-      const v=viaggi.find(x=>x.id===id); if(!v) return;
-      const d=descCompleta(v.summary,v.from,v.to)||v.merce||'(materiale)';
-      const coda=codaDnRb(v.summary);
-      html+=`<div class="viaggio" style="cursor:default">
-        <div class="v-top" style="flex-wrap:nowrap;gap:8px;align-items:flex-start">
-          <span style="font-family:monospace;font-weight:700;color:var(--accent);min-width:44px">${oraSlot(i)}</span>
-          <span style="flex:1 1 auto;min-width:0">
-            <span style="font-size:12px;color:var(--text-muted)">${SEDI[v.from]?.label||v.from} <i class="ti ti-arrow-right" style="font-size:11px"></i> ${SEDI[v.to]?.label||v.to}</span><br>
-            <span style="font-size:13.5px;font-weight:600;word-break:break-word">${d}</span>
-            ${coda?`<span class="tag" style="background:var(--surface-2);color:var(--text-secondary);font-size:10px;margin-left:6px">${coda}</span>`:''}
-          </span>
-          <span style="display:flex;flex-direction:column;gap:2px">
-            <button class="btn" style="padding:1px 8px;font-size:12px;line-height:1.2" onclick="spostaOrdine('${id}',-1)" ${i===0?'disabled':''}>▲</button>
-            <button class="btn" style="padding:1px 8px;font-size:12px;line-height:1.2" onclick="spostaOrdine('${id}',1)" ${i===ordine.length-1?'disabled':''}>▼</button>
-          </span>
-        </div>
-      </div>`;
-    });
-    html+='</div>';
-  }
 
   html+=`<div class="card" style="margin-top:4px"><div class="card-header"><span class="card-title">${usaMisura?'Giro su misura (i tuoi selezionati)':usaFisso?'Percorso fisso (ordine scelto)':'Percorso ottimizzato'} — cosa carica e cosa scarica</span></div>`;
   plan.seq.forEach((s,i)=>{
@@ -1664,6 +1659,38 @@ function renderCorriere(){
   });
   html+='</div>';
 
+  // ── Pre-stampa: l'ordine con cui Franco vuole girare (riordinabile) ──
+  const idsPiano=idsGiroCorriere(plan);
+  const ordine=ordineCorrente(idsPiano);
+  if(ordine.length){
+    html+='<div class="card" style="margin-top:12px"><div class="card-header"><span class="card-title"><i class="ti ti-list-numbers"></i> Ordine di stampa e autorizzazione</span>'+
+      `<div style="display:flex;gap:4px"><button class="btn" style="padding:2px 10px;font-size:11px" onclick="resetOrari()"><i class="ti ti-clock"></i> Orari automatici</button><button class="btn" style="padding:2px 10px;font-size:11px" onclick="resetOrdine()"><i class="ti ti-rotate"></i> Ordine del giro</button></div></div>`+
+      '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">Ultimo passaggio: sistema ordine e orari, poi <b>Stampa piano</b> per controllare e <b>Autorizza giro sedi</b> per scrivere gli orari sul calendario.</div>';
+    ordine.forEach((id,i)=>{
+      const v=viaggi.find(x=>x.id===id); if(!v) return;
+      const d=descCompleta(v.summary,v.from,v.to)||v.merce||'(materiale)';
+      const coda=codaDnRb(v.summary);
+      html+=`<div class="viaggio" style="cursor:default">
+        <div class="v-top" style="flex-wrap:nowrap;gap:8px;align-items:flex-start">
+          <span style="display:flex;align-items:center;gap:2px;flex-shrink:0">
+            <button class="btn" title="mezz'ora prima" style="padding:2px 7px;font-size:13px;line-height:1.1" onclick="spostaOra('${id}',${i},-30)">−</button>
+            <input type="time" step="1800" value="${oraDi(id,i)}" onchange="setOra('${id}',this.value)" style="width:92px;font-family:monospace;font-weight:700;color:var(--accent);font-size:13px;padding:4px 6px;border:1px solid var(--border);border-radius:7px;background:var(--surface)">
+            <button class="btn" title="mezz'ora dopo" style="padding:2px 7px;font-size:13px;line-height:1.1" onclick="spostaOra('${id}',${i},30)">+</button>
+          </span>
+          <span style="flex:1 1 auto;min-width:0">
+            <span style="font-size:12px;color:var(--text-muted)">${SEDI[v.from]?.label||v.from} <i class="ti ti-arrow-right" style="font-size:11px"></i> ${SEDI[v.to]?.label||v.to}</span><br>
+            <span style="font-size:13.5px;font-weight:600;word-break:break-word">${d}</span>
+            ${coda?`<span class="tag" style="background:var(--surface-2);color:var(--text-secondary);font-size:10px;margin-left:6px">${coda}</span>`:''}
+          </span>
+          <span style="display:flex;flex-direction:column;gap:2px;flex-shrink:0">
+            <button class="btn" style="padding:1px 8px;font-size:12px;line-height:1.2" onclick="spostaOrdine('${id}',-1)" ${i===0?'disabled':''}>▲</button>
+            <button class="btn" style="padding:1px 8px;font-size:12px;line-height:1.2" onclick="spostaOrdine('${id}',1)" ${i===ordine.length-1?'disabled':''}>▼</button>
+          </span>
+        </div>
+      </div>`;
+    });
+    html+='</div>';
+  }
   html+='<div class="card" style="margin-top:12px"><div class="card-header"><span class="card-title">Mappa del giro</span><span style="font-size:11px;color:var(--text-muted)">tracciato indicativo · OpenStreetMap</span></div><div id="corr-map" style="height:340px;width:100%"></div></div>';
 
   html+='<div class="card" style="margin-top:12px"><div class="card-header"><span class="card-title">Carichi del Corriere — modifica il giro</span></div>';
@@ -1769,8 +1796,8 @@ function renderCorriere(){
   disegnaMappaCorriere(plan);
   saveGiroState();
 }
-function saveGiroState(){ try{ localStorage.setItem('locom_giro_state', JSON.stringify({stato:corriereStato,pickup:corrierePickup,flex:corriereFlex,modo:corriereModo,fisso:corriereGiroFisso,sedi:corriereSedi,misura:giroMisura,ordine:ordineStampa})); }catch(e){} }
-function loadGiroState(){ try{ const s=JSON.parse(localStorage.getItem('locom_giro_state')||'{}'); if(s.stato)corriereStato=s.stato; if(s.pickup)corrierePickup=s.pickup; if(s.flex)corriereFlex=s.flex; if(s.modo)corriereModo=s.modo; if(s.fisso)corriereGiroFisso=s.fisso; if(s.sedi)corriereSedi=s.sedi; if(s.misura)giroMisura=s.misura; if(s.ordine)ordineStampa=s.ordine; }catch(e){} }
+function saveGiroState(){ try{ localStorage.setItem('locom_giro_state', JSON.stringify({stato:corriereStato,pickup:corrierePickup,flex:corriereFlex,modo:corriereModo,fisso:corriereGiroFisso,sedi:corriereSedi,misura:giroMisura,ordine:ordineStampa,orari:orariStampa})); }catch(e){} }
+function loadGiroState(){ try{ const s=JSON.parse(localStorage.getItem('locom_giro_state')||'{}'); if(s.stato)corriereStato=s.stato; if(s.pickup)corrierePickup=s.pickup; if(s.flex)corriereFlex=s.flex; if(s.modo)corriereModo=s.modo; if(s.fisso)corriereGiroFisso=s.fisso; if(s.sedi)corriereSedi=s.sedi; if(s.misura)giroMisura=s.misura; if(s.ordine)ordineStampa=s.ordine; if(s.orari)orariStampa=s.orari; }catch(e){} }
 loadGiroState();
 
 function disegnaMappaCorriere(plan){

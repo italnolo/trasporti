@@ -591,9 +591,13 @@ function initGoogle() {
 let utenteEmail='';
 const UTENTI_INSERIMENTO=['moxieissue@gmail.com'];  // chi vede "Inserisci viaggio in calendario"
 async function rilevaUtente(){
+  // 1) email già ottenuta al login (dal token) e ricordata
+  const salvata=sessionStorage.getItem('locom_email');
+  if(salvata){ utenteEmail=salvata.toLowerCase(); aggiornaVisibilitaInserimento(); return; }
+  // 2) tentativo di riserva: leggere il calendario primary (può fallire con lo scope attuale)
   try{
     const r=await fetch('https://www.googleapis.com/calendar/v3/calendars/primary',{headers:{'Authorization':'Bearer '+accessToken}});
-    if(r.ok){ const j=await r.json(); utenteEmail=(j.id||'').toLowerCase(); }
+    if(r.ok){ const j=await r.json(); utenteEmail=(j.id||'').toLowerCase(); sessionStorage.setItem('locom_email',utenteEmail); }
   }catch(e){}
   aggiornaVisibilitaInserimento();
 }
@@ -604,6 +608,14 @@ function aggiornaVisibilitaInserimento(){
 }
 
 function handleCredential(response) {
+  // L'ID token (JWT) contiene già l'email dell'utente: la leggo da qui,
+  // perché lo scope calendar.events non permette di leggere il calendario "primary".
+  try{
+    if(response && response.credential){
+      const payload=JSON.parse(decodeURIComponent(escape(atob(response.credential.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')))));
+      if(payload.email){ utenteEmail=payload.email.toLowerCase(); sessionStorage.setItem('locom_email',utenteEmail); aggiornaVisibilitaInserimento(); }
+    }
+  }catch(e){}
   // Con One Tap otteniamo id_token ma non access_token — chiediamo token OAuth
   tokenClient.requestAccessToken({prompt:''});
 }

@@ -456,16 +456,27 @@ body{font-family:var(--font);background:var(--bg);color:var(--text-primary);min-
       </div>
 
       <div style="display:flex;gap:10px;flex-wrap:wrap">
-        <div style="flex:1 1 180px"><label class="ins-lbl">Giorno</label><input type="date" id="ins-giorno" class="ins-in"></div>
-        <div style="flex:1 1 120px"><label class="ins-lbl">Orario</label><input type="time" id="ins-ora" class="ins-in" value="08:00"></div>
+        <div style="flex:1 1 150px"><label class="ins-lbl">Giorno</label><input type="date" id="ins-giorno" class="ins-in"></div>
+        <div style="flex:1 1 100px"><label class="ins-lbl">Dalle</label><input type="time" id="ins-ora" class="ins-in" value="08:00"></div>
+        <div style="flex:1 1 100px"><label class="ins-lbl">Alle</label><input type="time" id="ins-ora-fine" class="ins-in" value="10:00"></div>
       </div>
       <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-secondary);margin:6px 0 14px">
-        <input type="checkbox" id="ins-allday"> Tutto il giorno (senza orario)
+        <input type="checkbox" id="ins-allday"> Tutto il giorno (senza orari)
       </label>
 
       <div id="ins-preview" style="font-size:13px;background:var(--surface-2);border-radius:10px;padding:10px 12px;margin-bottom:14px;word-break:break-word"></div>
 
       <button class="btn success" onclick="insInvia()"><i class="ti ti-calendar-plus"></i> Inserisci nel calendario</button>
+
+      <div style="border-top:1px solid var(--border);margin-top:20px;padding-top:16px">
+        <label class="ins-lbl" style="margin-top:0"><i class="ti ti-mail"></i> Comunicazione alle sedi</label>
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Scegli le sedi da avvisare del viaggio. Apre la mail già pronta con il riepilogo: basta premere invio.</div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;margin-bottom:6px">
+          <input type="checkbox" id="ins-sede-all" onchange="insToggleTutte(this.checked)"> Tutte le sedi
+        </label>
+        <div id="ins-sedi-box" style="display:flex;flex-wrap:wrap;gap:6px 14px;margin-bottom:12px"></div>
+        <button class="btn" onclick="insInviaComunicazione()"><i class="ti ti-send"></i> Invia comunicazione</button>
+      </div>
     </div>
   </div>
 
@@ -1089,6 +1100,12 @@ function tipoViaggioChange(){
 const CORRIERE_CAL='corrierelocom@gmail.com';
 
 // ── Maschera "Inserisci viaggio in calendario" (solo utenti autorizzati) ──
+// Indirizzi e-mail banco delle sedi (dalla rubrica @italnolo.it)
+const SEDE_EMAIL={
+  SP:'laspezia@italnolo.it', SZ:'sarzana@italnolo.it', MS:'massa@italnolo.it',
+  VI:'viareggio@italnolo.it', LU:'lucca@italnolo.it', PI:'pisa@italnolo.it',
+  EM:'empoli@italnolo.it', GE:'pontedera@italnolo.it'
+};
 let insTipo='spostamento', insSigla='DN';
 function insSetTipo(t){
   insTipo=t;
@@ -1110,10 +1127,16 @@ function renderInserisci(){
   const dl=document.getElementById('ins-mezzi'); if(dl) dl.innerHTML=automezzi.map(m=>`<option value="${(m.targa||m.nome||m)}">`).join('');
   const oggi=corrDayKey ? corrDayKey(0) : new Date().toISOString().split('T')[0];
   ['ins-giorno','ins-sig-data'].forEach(id=>{const el=document.getElementById(id); if(el&&!el.value) el.value=oggi;});
-  ['ins-cal','ins-da','ins-a','ins-sede','ins-ditta','ins-cantiere','ins-attr','ins-veicolo','ins-autista','ins-ref','ins-tel','ins-giorno','ins-ora','ins-sig-data'].forEach(id=>{
+  ['ins-cal','ins-da','ins-a','ins-sede','ins-ditta','ins-cantiere','ins-attr','ins-veicolo','ins-autista','ins-ref','ins-tel','ins-giorno','ins-ora','ins-ora-fine','ins-sig-data'].forEach(id=>{
     const el=document.getElementById(id); if(el&&!el.dataset.bound){el.addEventListener('input',insPreview); el.dataset.bound='1';}
   });
-  const cb=document.getElementById('ins-allday'); if(cb&&!cb.dataset.bound){cb.addEventListener('change',()=>{document.getElementById('ins-ora').disabled=cb.checked; insPreview();}); cb.dataset.bound='1';}
+  const cb=document.getElementById('ins-allday'); if(cb&&!cb.dataset.bound){cb.addEventListener('change',()=>{const d=cb.checked;document.getElementById('ins-ora').disabled=d;document.getElementById('ins-ora-fine').disabled=d; insPreview();}); cb.dataset.bound='1';}
+  // checkbox sedi per la comunicazione
+  const box=document.getElementById('ins-sedi-box');
+  if(box && !box.dataset.filled){
+    box.innerHTML=Object.keys(SEDE_EMAIL).map(c=>`<label style="display:flex;align-items:center;gap:5px;font-size:13px"><input type="checkbox" class="ins-sede-ck" value="${c}"> ${SEDI[c]?.label||c}</label>`).join('');
+    box.dataset.filled='1';
+  }
   insSetTipo(insTipo); insSetSigla(insSigla); insPreview();
 }
 function insVal(id){const el=document.getElementById(id); return el?el.value.trim():'';}
@@ -1140,7 +1163,7 @@ function insPreview(){
   const ref=insVal('ins-ref'), tel=insVal('ins-tel');
   const contatto=(ref||tel)?` · ${ref}${ref&&tel?' ':''}${tel?'☎ '+tel:''}`:'';
   const allday=document.getElementById('ins-allday').checked;
-  const quando=allday?insVal('ins-giorno'):`${insVal('ins-giorno')} ${insVal('ins-ora')}`;
+  const quando=allday?insVal('ins-giorno'):`${insVal('ins-giorno')} ${insVal('ins-ora')}–${insVal('ins-ora-fine')}`;
   document.getElementById('ins-preview').innerHTML=`<b>Su:</b> ${cal}<br><b>Titolo:</b> ${t}<br><b>Quando:</b> ${quando}${cantiere}${contatto}`;
 }
 function insMsg(testo,tipo){
@@ -1172,7 +1195,10 @@ async function insInvia(){
     body.start={date:giorno}; body.end={date:giorno};
   }else{
     const ora=insVal('ins-ora')||'08:00';
-    const [h,m]=ora.split(':').map(Number); const fine=String(Math.min(23,h+1)).padStart(2,'0')+':'+String(m).padStart(2,'0');
+    let fine=insVal('ins-ora-fine')||'';
+    // se la fine manca o non è dopo l'inizio, metto un'ora dopo
+    const toMin=t=>{const[h,m]=t.split(':').map(Number);return h*60+m;};
+    if(!fine || toMin(fine)<=toMin(ora)){ const [h,m]=ora.split(':').map(Number); fine=String(Math.min(23,h+1)).padStart(2,'0')+':'+String(m).padStart(2,'0'); }
     body.start={dateTime:`${giorno}T${ora}:00`,timeZone:'Europe/Rome'};
     body.end={dateTime:`${giorno}T${fine}:00`,timeZone:'Europe/Rome'};
   }
@@ -1180,9 +1206,9 @@ async function insInvia(){
   insMsg('Sto inserendo…','info');
   try{
     await apiCreateEvent(cal, body);
-    insMsg(`✓ Inserito su <b>${calMeta(cal).label}</b>: ${title}`,'ok');
-    document.getElementById('ins-attr').value=''; document.getElementById('ins-cantiere').value='';
-    document.getElementById('ins-ditta').value=''; document.getElementById('ins-ref').value=''; document.getElementById('ins-tel').value='';
+    insMsg(`✓ Inserito su <b>${calMeta(cal).label}</b>: ${title}. Ora puoi avvisare le sedi qui sotto.`,'ok');
+    // preseleziono le sedi coinvolte per la comunicazione (destinazione e, se spostamento, partenza)
+    insPreselezionaSedi();
     insPreview();
     if(cal===CORRIERE_CAL) loadDay();
   }catch(err){
@@ -1191,6 +1217,50 @@ async function insInvia(){
       insMsg(`Non hai il permesso di scrivere su <b>${calMeta(cal).label}</b>. Fai condividere quel calendario al tuo indirizzo con "Apportare modifiche agli eventi".`,'err');
     else insMsg('Errore: '+s,'err');
   }
+}
+// preseleziona le checkbox sede in base al viaggio impostato
+function insPreselezionaSedi(){
+  document.querySelectorAll('.ins-sede-ck').forEach(ck=>ck.checked=false);
+  const set=new Set();
+  if(insTipo==='spostamento'){ set.add(insVal('ins-da')); set.add(insVal('ins-a')); }
+  else { set.add(insVal('ins-sede')); }
+  document.querySelectorAll('.ins-sede-ck').forEach(ck=>{ if(set.has(ck.value)) ck.checked=true; });
+  const all=document.getElementById('ins-sede-all'); if(all) all.checked=false;
+}
+function insToggleTutte(on){ document.querySelectorAll('.ins-sede-ck').forEach(ck=>ck.checked=on); }
+function insInviaComunicazione(){
+  const scelte=[...document.querySelectorAll('.ins-sede-ck')].filter(ck=>ck.checked).map(ck=>ck.value);
+  if(!scelte.length){ insMsg('Scegli almeno una sede da avvisare (o spunta "Tutte le sedi").','err'); return; }
+  const dest=scelte.map(c=>SEDE_EMAIL[c]).filter(Boolean);
+  const attr=insVal('ins-attr')||'(attrezzatura)';
+  const allday=document.getElementById('ins-allday').checked;
+  const giorno=insVal('ins-giorno');
+  const orario=allday?'in giornata':`${insVal('ins-ora')}–${insVal('ins-ora-fine')}`;
+  let tratta='';
+  if(insTipo==='spostamento') tratta=`${SEDI[insVal('ins-da')]?.label||insVal('ins-da')} → ${SEDI[insVal('ins-a')]?.label||insVal('ins-a')}`;
+  else if(insTipo==='consegna') tratta=`Consegna in cantiere: ${insVal('ins-cantiere')}${insVal('ins-ditta')?' ('+insVal('ins-ditta')+')':''}`;
+  else tratta=`Ritiro da cantiere: ${insVal('ins-cantiere')}${insVal('ins-ditta')?' ('+insVal('ins-ditta')+')':''}`;
+  const gg=giorno?giorno.split('-').reverse().join('/'):'(da definire)';
+  const ogg=`Viaggio ${tratta} — ${gg}`;
+  const righe=[
+    `Vi comunico il seguente viaggio del Corriere Lo.Com:`,'',
+    `• Tratta: ${tratta}`,
+    `• Attrezzatura: ${attr}`,
+    `• Giorno: ${gg}`,
+    `• Orario: ${orario}`,
+    insVal('ins-veicolo')?`• Veicolo: ${insVal('ins-veicolo')}`:'',
+    insVal('ins-autista')?`• Autista: ${insVal('ins-autista')}`:'',
+    insVal('ins-ref')?`• Referente: ${insVal('ins-ref')}`:'',
+    insVal('ins-tel')?`• Telefono: ${insVal('ins-tel')}`:'',
+    '','Grazie.'
+  ].filter(x=>x!=='').join('\n');
+  // apre Gmail già compilata: le sedi in Ccn per non esporre gli indirizzi tra loro
+  const url='https://mail.google.com/mail/?view=cm&fs=1'
+    +'&bcc='+encodeURIComponent(dest.join(','))
+    +'&su='+encodeURIComponent(ogg)
+    +'&body='+encodeURIComponent(righe);
+  window.open(url,'_blank');
+  insMsg(`✉️ Comunicazione pronta per ${scelte.length} sed${scelte.length>1?'i':'e'}. Controlla la mail aperta e premi Invia.`,'ok');
 }
 function nextDateStr(ds){const [y,m,d]=ds.split('-').map(Number);const dt=new Date(Date.UTC(y,m-1,d));dt.setUTCDate(dt.getUTCDate()+1);return dt.toISOString().split('T')[0];}
 async function apiCreateEvent(calId,body){

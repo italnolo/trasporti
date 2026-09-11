@@ -1551,9 +1551,14 @@ function renderCorriere(){
     const from=pickupCollo(it.id)||it.from;
     return {id:it.id, from, fromOrig:it.from, to:it.to, label:it.label, stato, deliver:(stato==='giro'), carried:false, pren:it.pren, rb:!!it.rb};
   });
-  // Segnati "già caricato ieri": oggi partono a bordo, si scaricano e basta.
+  // Segnati "già caricato ieri": oggi partono a bordo e vanno solo scaricati.
+  // Presi da TUTTI i viaggi del giorno (anche quelli che sarebbero "fuori"),
+  // così un collo già a bordo da un trasferimento interno rientra nello scarico.
   const colli=colliTutti.filter(c=>!giaCaricato(c.id));
-  const colliPreCaricati=colliTutti.filter(c=>giaCaricato(c.id)).map(c=>({...c, carried:true, gia:true}));
+  const colliPreCaricati=rawAll.filter(it=>giaCaricato(it.id)).map(it=>({
+    id:it.id, from:it.from, fromOrig:it.from, to:it.to, label:it.label,
+    stato:'giro', deliver:true, carried:true, gia:true, pren:it.pren
+  }));
   // colli GIÀ a bordo da ieri (rimasti sul camion) + quelli caricati ieri sera
   const colliCarried=carried.map(it=>{
     const stato=statoCollo(it.id);
@@ -1569,7 +1574,7 @@ function renderCorriere(){
   if(usaMisura){
     // Giro su misura: solo i colli selezionati, ottimizzati in automatico dalla base.
     plan=pianificaGiro(corriereBase, inGiroTodayAll.map(mapIt), carriedActive.map(mapIt));
-    restaFuori=rawAll.filter(it=>!selMap[it.id]).map(it=>({id:it.id,from:it.from,to:it.to,label:it.label,pren:it.pren,stato:'giro'}));
+    restaFuori=rawAll.filter(it=>!selMap[it.id] && !giaCaricato(it.id)).map(it=>({id:it.id,from:it.from,to:it.to,label:it.label,pren:it.pren,stato:'giro'}));
   }else if(usaFisso){
     // Segue l'ordine dato da Franco (doppi passaggi ammessi).
     plan=pianificaGiroFisso(seqFissa, inGiroTodayAll.map(mapIt), carriedActive.map(mapIt));
@@ -1593,7 +1598,7 @@ function renderCorriere(){
   const nColli=usaMisura?(inGiroTodayAll.length+carriedActive.length):((inGiroTodayAll.length-restaFuori.length)+carriedActive.length);
   const nFermate=plan.seq.filter(s=>!s.start&&!s.rientro).length;
   corriereLastPlan=plan; corriereLastMeta={data:corrDayKey(0),base:corriereBase,nColli,nFermate,sediTxt:(usaFisso?('ordine fisso: '+seqFissa.map(c=>SEDI[c]?.label||c).join(' → ')):(tutteSediScelte()?'tutte':Object.keys(SEDI).filter(c=>allowedSede(c)).map(c=>SEDI[c].label).join(', ')))};
-  corriereLastFuori=restaFuori.map(c=>({from:c.from,to:c.to,label:c.label}));
+  corriereLastFuori=restaFuori.map(c=>({id:c.id,from:c.from,to:c.to,label:c.label}));
 
   let html=`
     <div class="kpi-row" style="grid-template-columns:repeat(3,1fr)">
@@ -1700,6 +1705,7 @@ function renderCorriere(){
         <div class="v-top" style="flex-wrap:wrap;gap:8px">
           <span class="v-route" style="flex:1 1 200px">${c.pren?'<span style="color:#b45309">★</span> ':''}${SEDI[c.from]?.label||c.from} <i class="ti ti-arrow-right" style="font-size:12px;color:#c8cdd6"></i> ${SEDI[c.to]?.label||c.to} — ${c.label}</span>
           <div style="display:flex;gap:4px;flex-wrap:wrap">
+            <button class="btn" style="padding:3px 9px;font-size:11px" onclick="toggleGiaCaricato('${c.id}')" title="Già a bordo da un trasferimento interno: mettilo nello scarico di oggi"><i class="ti ti-package-import"></i> Già caricato ieri</button>
             <button class="btn" style="padding:3px 9px;font-size:11px" onclick="rimandaADomani('${c.id}')"><i class="ti ti-arrow-forward"></i> A domani</button>
             <button class="btn" style="padding:3px 9px;font-size:11px" onclick="document.getElementById('mv-${eid}').style.display='flex'"><i class="ti ti-calendar-event"></i> Altra data</button>
             <button class="btn" style="padding:3px 9px;font-size:11px;color:var(--red)" onclick="eliminaViaggio('${c.id}','${eid}')"><i class="ti ti-trash"></i> Elimina</button>

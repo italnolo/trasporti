@@ -475,7 +475,10 @@ body{font-family:var(--font);background:var(--bg);color:var(--text-primary);min-
           <input type="checkbox" id="ins-sede-all" onchange="insToggleTutte(this.checked)"> Tutte le sedi
         </label>
         <div id="ins-sedi-box" style="display:flex;flex-wrap:wrap;gap:6px 14px;margin-bottom:12px"></div>
-        <button class="btn" onclick="insInviaComunicazione()"><i class="ti ti-send"></i> Invia comunicazione</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn" onclick="insInviaComunicazione()"><i class="ti ti-send"></i> Invia comunicazione</button>
+          <button class="btn" style="border-color:#25d366;color:#128c4b" onclick="insWhatsApp()"><i class="ti ti-brand-whatsapp"></i> WhatsApp</button>
+        </div>
       </div>
     </div>
   </div>
@@ -1261,6 +1264,40 @@ function insInviaComunicazione(){
     +'&body='+encodeURIComponent(righe);
   window.open(url,'_blank');
   insMsg(`✉️ Comunicazione pronta per ${scelte.length} sed${scelte.length>1?'i':'e'}. Controlla la mail aperta e premi Invia.`,'ok');
+}
+// Messaggio breve WhatsApp del viaggio
+function insTestoWhatsApp(){
+  const attr=insVal('ins-attr')||'(attrezzatura)';
+  const allday=document.getElementById('ins-allday').checked;
+  const gg=insVal('ins-giorno')?insVal('ins-giorno').split('-').reverse().join('/'):'(giorno)';
+  const orario=allday?'in giornata':`${insVal('ins-ora')}-${insVal('ins-ora-fine')}`;
+  let tratta='';
+  if(insTipo==='spostamento') tratta=`${SEDI[insVal('ins-da')]?.label||insVal('ins-da')} → ${SEDI[insVal('ins-a')]?.label||insVal('ins-a')}`;
+  else if(insTipo==='consegna') tratta=`consegna a ${insVal('ins-cantiere')||'cantiere'}`;
+  else tratta=`ritiro da ${insVal('ins-cantiere')||'cantiere'}`;
+  const mezzo=[insVal('ins-autista'),insVal('ins-veicolo')].filter(Boolean).join(' ');
+  return `🚚 Viaggio Lo.Com\n${tratta}\n📦 ${attr}\n📅 ${gg} · ${orario}`+(mezzo?`\n🚛 ${mezzo}`:'');
+}
+// normalizza un numero italiano in formato internazionale per wa.me
+function normNumWa(t){
+  let n=(t||'').replace(/[^\d+]/g,'');
+  if(!n) return '';
+  if(n.startsWith('+')) return n.replace(/\D/g,'');
+  if(n.startsWith('00')) return n.slice(2);
+  if(n.startsWith('39')) return n;
+  if(n.startsWith('3')) return '39'+n;   // cellulare italiano
+  return n;
+}
+function insWhatsApp(){
+  const testo=insTestoWhatsApp();
+  const num=normNumWa(insVal('ins-tel'));
+  const url = num
+    ? `https://wa.me/${num}?text=${encodeURIComponent(testo)}`
+    : `https://wa.me/?text=${encodeURIComponent(testo)}`;
+  window.open(url,'_blank');
+  insMsg(num
+    ? `📲 WhatsApp pronto per il referente (${insVal('ins-tel')}). Controlla e premi invia.`
+    : `📲 WhatsApp aperto: scegli il contatto o il gruppo a cui inoltrare il messaggio.`,'ok');
 }
 function nextDateStr(ds){const [y,m,d]=ds.split('-').map(Number);const dt=new Date(Date.UTC(y,m-1,d));dt.setUTCDate(dt.getUTCDate()+1);return dt.toISOString().split('T')[0];}
 async function apiCreateEvent(calId,body){

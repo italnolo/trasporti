@@ -187,6 +187,10 @@ body{font-family:var(--font);background:var(--bg);color:var(--text-primary);min-
   #print-area table.pt tr{page-break-inside:avoid;page-break-after:auto}
   #print-area table.pt thead{display:table-header-group}
 }
+.ins-lbl{display:block;font-size:12px;font-weight:600;color:var(--text-secondary);margin:12px 0 5px}
+.ins-in{width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text-primary);font-size:14px;font-family:inherit;margin-bottom:2px}
+.ins-tipo{padding:7px 12px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text-secondary);font-size:12.5px;cursor:pointer;font-family:inherit}
+.ins-tipo.active{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
 </style>
 </head>
 <body>
@@ -235,7 +239,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text-primary);min-
   <div class="nav-section">Gestione</div>
   <div class="nav-item" id="nav-nuovo" onclick="showView('nuovo')"><i class="ti ti-plus"></i> Nuovo viaggio</div>
   <div class="nav-item" id="nav-automezzi" onclick="showView('automezzi')"><i class="ti ti-truck"></i> Automezzi</div>
-</nav>
+  <div class="nav-item" id="nav-inserisci" onclick="showView('inserisci')" style="display:none;color:var(--accent)"><i class="ti ti-calendar-plus"></i> Inserisci viaggio</div>
 
 <main class="main" id="main-content">
 
@@ -392,6 +396,78 @@ body{font-family:var(--font);background:var(--bg);color:var(--text-primary);min-
     <button class="btn" style="margin-top:12px" onclick="addMezzo()"><i class="ti ti-plus"></i> Aggiungi mezzo</button>
   </div>
 
+  <div id="view-inserisci" style="display:none">
+    <div style="font-size:22px;font-weight:600;margin-bottom:4px"><i class="ti ti-calendar-plus"></i> Inserisci viaggio in calendario</div>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:20px">Sezione riservata. Scrive direttamente un evento sul calendario scelto.</div>
+    <div class="card" style="max-width:640px">
+      <div id="ins-msg" style="display:none;margin-bottom:14px;padding:10px 12px;border-radius:10px;font-size:13px"></div>
+
+      <label class="ins-lbl">Calendario di destinazione</label>
+      <select id="ins-cal" class="ins-in">
+        <option value="corrierelocom@gmail.com">Corriere Lo.Com</option>
+        <option value="italnoloviareggio@gmail.com">Italnolo Viareggio</option>
+        <option value="italnolosarzana@gmail.com">Italnolo Sarzana</option>
+        <option value="italnolopisa@gmail.com">Italnolo Pisa</option>
+      </select>
+
+      <label class="ins-lbl">Tipo di operazione</label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+        <button type="button" class="ins-tipo active" data-tipo="spostamento" onclick="insSetTipo('spostamento')">Spostamento (sede → sede)</button>
+        <button type="button" class="ins-tipo" data-tipo="consegna" onclick="insSetTipo('consegna')">Consegna in cantiere</button>
+        <button type="button" class="ins-tipo" data-tipo="ritiro" onclick="insSetTipo('ritiro')">Ritiro da cantiere</button>
+      </div>
+
+      <!-- Spostamento: da/a sede -->
+      <div id="ins-row-sedi" style="display:flex;gap:10px;flex-wrap:wrap">
+        <div style="flex:1 1 180px"><label class="ins-lbl">Da (sede)</label><select id="ins-da" class="ins-in"></select></div>
+        <div style="flex:1 1 180px"><label class="ins-lbl">A (sede)</label><select id="ins-a" class="ins-in"></select></div>
+      </div>
+
+      <!-- Consegna/Ritiro: sede + cantiere -->
+      <div id="ins-row-cantiere" style="display:none">
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <div style="flex:1 1 180px"><label class="ins-lbl" id="ins-sede-lbl">Sede di partenza</label><select id="ins-sede" class="ins-in"></select></div>
+          <div style="flex:1 1 180px"><label class="ins-lbl">Ditta / cliente</label><input id="ins-ditta" class="ins-in" placeholder="es. Rossi Costruzioni srl"></div>
+        </div>
+        <label class="ins-lbl">Cantiere / indirizzo</label>
+        <input id="ins-cantiere" class="ins-in" placeholder="es. Via del Mare 12, Massa">
+      </div>
+
+      <label class="ins-lbl">Attrezzatura (e accessori)</label>
+      <input id="ins-attr" class="ins-in" placeholder="es. BETONIERA 300LT. (con carriola)">
+
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <div style="flex:1 1 180px"><label class="ins-lbl">Veicolo</label><input id="ins-veicolo" class="ins-in" list="ins-mezzi" placeholder="targa o nome"><datalist id="ins-mezzi"></datalist></div>
+        <div style="flex:1 1 180px"><label class="ins-lbl">Autista</label><input id="ins-autista" class="ins-in" placeholder="es. Franco"></div>
+      </div>
+
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <div style="flex:1 1 180px"><label class="ins-lbl">Referente (in cantiere)</label><input id="ins-ref" class="ins-in" placeholder="nome referente"></div>
+        <div style="flex:1 1 180px"><label class="ins-lbl">Telefono</label><input id="ins-tel" class="ins-in" inputmode="tel" placeholder="es. 333 1234567"></div>
+      </div>
+
+      <label class="ins-lbl">Sigla</label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;align-items:center">
+        <button type="button" class="ins-tipo" id="ins-sig-nessuna" data-sig="" onclick="insSetSigla('')">Nessuna</button>
+        <button type="button" class="ins-tipo active" id="ins-sig-dn" data-sig="DN" onclick="insSetSigla('DN')">DN (data noleggio)</button>
+        <button type="button" class="ins-tipo" id="ins-sig-rb" data-sig="RB" onclick="insSetSigla('RB')">RB (rientro/bilanciam.)</button>
+        <input type="date" id="ins-sig-data" class="ins-in" style="width:auto;margin:0">
+      </div>
+
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <div style="flex:1 1 180px"><label class="ins-lbl">Giorno</label><input type="date" id="ins-giorno" class="ins-in"></div>
+        <div style="flex:1 1 120px"><label class="ins-lbl">Orario</label><input type="time" id="ins-ora" class="ins-in" value="08:00"></div>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-secondary);margin:6px 0 14px">
+        <input type="checkbox" id="ins-allday"> Tutto il giorno (senza orario)
+      </label>
+
+      <div id="ins-preview" style="font-size:13px;background:var(--surface-2);border-radius:10px;padding:10px 12px;margin-bottom:14px;word-break:break-word"></div>
+
+      <button class="btn success" onclick="insInvia()"><i class="ti ti-calendar-plus"></i> Inserisci nel calendario</button>
+    </div>
+  </div>
+
 </main>
 <div id="print-area"></div>
 <div id="js-error" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;background:#b42318;color:#fff;font:12px/1.4 monospace;padding:8px 12px"></div>
@@ -487,6 +563,7 @@ function initGoogle() {
       if(resp.error) { showLoginError('Errore accesso: '+resp.error); return; }
       accessToken = resp.access_token;
       document.getElementById('login-screen').style.display = 'none';
+      rilevaUtente();
       loadDay();
     },
   });
@@ -502,8 +579,26 @@ function initGoogle() {
   if(saved) {
     accessToken = saved;
     document.getElementById('login-screen').style.display = 'none';
+    rilevaUtente();
     loadDay();
   }
+}
+
+// Chi è loggato: l'id del calendario "primary" è l'email dell'utente.
+// Non serve nessuno scope in più.
+let utenteEmail='';
+const UTENTI_INSERIMENTO=['moxieissue@gmail.com'];  // chi vede "Inserisci viaggio in calendario"
+async function rilevaUtente(){
+  try{
+    const r=await fetch('https://www.googleapis.com/calendar/v3/calendars/primary',{headers:{'Authorization':'Bearer '+accessToken}});
+    if(r.ok){ const j=await r.json(); utenteEmail=(j.id||'').toLowerCase(); }
+  }catch(e){}
+  aggiornaVisibilitaInserimento();
+}
+function puoInserire(){ return UTENTI_INSERIMENTO.indexOf(utenteEmail)>=0; }
+function aggiornaVisibilitaInserimento(){
+  const nav=document.getElementById('nav-inserisci');
+  if(nav) nav.style.display = puoInserire()?'':'none';
 }
 
 function handleCredential(response) {
@@ -976,8 +1071,110 @@ function tipoViaggioChange(){
   document.getElementById('row-finestra').style.display = t==='finestra'?'':'none';
 }
 
-// ── Scrittura sul SOLO calendario Corriere ────────────────────────────────
-const CORRIERE_CAL='corrierelocom@gmail.com';
+// ── Maschera "Inserisci viaggio in calendario" (solo utenti autorizzati) ──
+let insTipo='spostamento', insSigla='DN';
+function insSetTipo(t){
+  insTipo=t;
+  document.querySelectorAll('.ins-tipo[data-tipo]').forEach(b=>b.classList.toggle('active',b.dataset.tipo===t));
+  document.getElementById('ins-row-sedi').style.display = t==='spostamento'?'flex':'none';
+  document.getElementById('ins-row-cantiere').style.display = t==='spostamento'?'none':'';
+  document.getElementById('ins-sede-lbl').textContent = t==='ritiro'?'Sede di rientro':'Sede di partenza';
+  insPreview();
+}
+function insSetSigla(s){
+  insSigla=s;
+  document.querySelectorAll('.ins-tipo[data-sig]').forEach(b=>b.classList.toggle('active',b.dataset.sig===s));
+  document.getElementById('ins-sig-data').style.display = s?'':'none';
+  insPreview();
+}
+function renderInserisci(){
+  const sedeOpts=Object.keys(SEDI).map(c=>`<option value="${c}">${SEDI[c].label}</option>`).join('');
+  ['ins-da','ins-a','ins-sede'].forEach(id=>{const el=document.getElementById(id); if(el&&!el.dataset.filled){el.innerHTML=sedeOpts; el.dataset.filled='1';}});
+  const dl=document.getElementById('ins-mezzi'); if(dl) dl.innerHTML=automezzi.map(m=>`<option value="${(m.targa||m.nome||m)}">`).join('');
+  const oggi=corrDayKey ? corrDayKey(0) : new Date().toISOString().split('T')[0];
+  ['ins-giorno','ins-sig-data'].forEach(id=>{const el=document.getElementById(id); if(el&&!el.value) el.value=oggi;});
+  ['ins-cal','ins-da','ins-a','ins-sede','ins-ditta','ins-cantiere','ins-attr','ins-veicolo','ins-autista','ins-ref','ins-tel','ins-giorno','ins-ora','ins-sig-data'].forEach(id=>{
+    const el=document.getElementById(id); if(el&&!el.dataset.bound){el.addEventListener('input',insPreview); el.dataset.bound='1';}
+  });
+  const cb=document.getElementById('ins-allday'); if(cb&&!cb.dataset.bound){cb.addEventListener('change',()=>{document.getElementById('ins-ora').disabled=cb.checked; insPreview();}); cb.dataset.bound='1';}
+  insSetTipo(insTipo); insSetSigla(insSigla); insPreview();
+}
+function insVal(id){const el=document.getElementById(id); return el?el.value.trim():'';}
+// Titolo secondo le regole del vademecum: SIGLE + articolo (accessori) - DN gg/mm
+function insBuildTitle(){
+  const attr=insVal('ins-attr')||'(attrezzatura)';
+  let testa='';
+  if(insTipo==='spostamento'){
+    testa=`${insVal('ins-da')}-${insVal('ins-a')} `;
+  }else if(insTipo==='consegna'){
+    const d=insVal('ins-ditta'); testa=`${insVal('ins-sede')}-CANTIERE ${d?d+' ':''}`;
+  }else{ // ritiro
+    const d=insVal('ins-ditta'); testa=`CANTIERE ${d?d+' ':''}-${insVal('ins-sede')} `;
+  }
+  let coda='';
+  if(insSigla==='DN'){ const g=insVal('ins-sig-data'); coda=' - DN'+(g?' '+g.split('-').reverse().slice(0,2).join('/'):''); }
+  else if(insSigla==='RB'){ coda=' - RB'; }
+  return (testa+attr+coda).trim();
+}
+function insPreview(){
+  const cal=calMeta(insVal('ins-cal')).label;
+  const t=insBuildTitle();
+  const cantiere=(insTipo!=='spostamento'&&insVal('ins-cantiere'))?` · ${insVal('ins-cantiere')}`:'';
+  const ref=insVal('ins-ref'), tel=insVal('ins-tel');
+  const contatto=(ref||tel)?` · ${ref}${ref&&tel?' ':''}${tel?'☎ '+tel:''}`:'';
+  const allday=document.getElementById('ins-allday').checked;
+  const quando=allday?insVal('ins-giorno'):`${insVal('ins-giorno')} ${insVal('ins-ora')}`;
+  document.getElementById('ins-preview').innerHTML=`<b>Su:</b> ${cal}<br><b>Titolo:</b> ${t}<br><b>Quando:</b> ${quando}${cantiere}${contatto}`;
+}
+function insMsg(testo,tipo){
+  const el=document.getElementById('ins-msg'); el.style.display='';
+  el.style.background = tipo==='ok'?'var(--green-bg)':tipo==='err'?'#fde8e6':'var(--surface-2)';
+  el.style.color = tipo==='ok'?'var(--green)':tipo==='err'?'#b42318':'var(--text-secondary)';
+  el.innerHTML=testo;
+}
+async function insInvia(){
+  if(!puoInserire()){ insMsg('Non sei autorizzato a inserire.','err'); return; }
+  const cal=insVal('ins-cal');
+  if(!insVal('ins-attr')){ insMsg('Manca l\'attrezzatura.','err'); return; }
+  if(insTipo==='spostamento' && insVal('ins-da')===insVal('ins-a')){ insMsg('Sede di partenza e arrivo sono uguali.','err'); return; }
+  if(insTipo!=='spostamento' && !insVal('ins-cantiere')){ insMsg('Manca il cantiere / indirizzo.','err'); return; }
+  const giorno=insVal('ins-giorno'); if(!giorno){ insMsg('Manca il giorno.','err'); return; }
+  const allday=document.getElementById('ins-allday').checked;
+  const title=insBuildTitle();
+  // descrizione con i dati di contatto e cantiere
+  const desc=[
+    insTipo!=='spostamento'?`Cantiere: ${insVal('ins-cantiere')}`:'',
+    insVal('ins-ditta')?`Ditta/cliente: ${insVal('ins-ditta')}`:'',
+    insVal('ins-ref')?`Referente: ${insVal('ins-ref')}`:'',
+    insVal('ins-tel')?`Telefono: ${insVal('ins-tel')}`:'',
+    insVal('ins-veicolo')?`Veicolo: ${insVal('ins-veicolo')}`:'',
+    insVal('ins-autista')?`Autista: ${insVal('ins-autista')}`:'',
+  ].filter(Boolean).join('\n');
+  const body={ summary:title, description:desc };
+  if(allday){
+    body.start={date:giorno}; body.end={date:giorno};
+  }else{
+    const ora=insVal('ins-ora')||'08:00';
+    const [h,m]=ora.split(':').map(Number); const fine=String(Math.min(23,h+1)).padStart(2,'0')+':'+String(m).padStart(2,'0');
+    body.start={dateTime:`${giorno}T${ora}:00`,timeZone:'Europe/Rome'};
+    body.end={dateTime:`${giorno}T${fine}:00`,timeZone:'Europe/Rome'};
+  }
+  if(insVal('ins-veicolo')) body.location=insVal('ins-veicolo');
+  insMsg('Sto inserendo…','info');
+  try{
+    await apiCreateEvent(cal, body);
+    insMsg(`✓ Inserito su <b>${calMeta(cal).label}</b>: ${title}`,'ok');
+    document.getElementById('ins-attr').value=''; document.getElementById('ins-cantiere').value='';
+    document.getElementById('ins-ditta').value=''; document.getElementById('ins-ref').value=''; document.getElementById('ins-tel').value='';
+    insPreview();
+    if(cal===CORRIERE_CAL) loadDay();
+  }catch(err){
+    const s=(err.message||'');
+    if(s.includes('403')||s.includes('writer')||s.includes('owner'))
+      insMsg(`Non hai il permesso di scrivere su <b>${calMeta(cal).label}</b>. Fai condividere quel calendario al tuo indirizzo con "Apportare modifiche agli eventi".`,'err');
+    else insMsg('Errore: '+s,'err');
+  }
+}
 function nextDateStr(ds){const [y,m,d]=ds.split('-').map(Number);const dt=new Date(Date.UTC(y,m-1,d));dt.setUTCDate(dt.getUTCDate()+1);return dt.toISOString().split('T')[0];}
 async function apiCreateEvent(calId,body){
   const r=await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events`,{
@@ -1092,7 +1289,7 @@ async function eliminaViaggio(eventId,eid){
 function changeDay(delta){currentDay+=delta;loadDay();}
 
 function showView(name){
-  ['oggi','sedi','corriere','tariffe','nuovo','automezzi'].forEach(v=>{
+  ['oggi','sedi','corriere','tariffe','nuovo','automezzi','inserisci'].forEach(v=>{
     const el=document.getElementById('view-'+v); if(el) el.style.display=v===name?'':'none';
     const nav=document.getElementById('nav-'+v);
     if(nav) nav.classList.toggle('active',v===name);
@@ -1101,6 +1298,7 @@ function showView(name){
   if(name==='nuovo') populateNuovoForm();
   if(name==='sedi'){renderSediGrid();document.getElementById('sede-detail').innerHTML='';}
   if(name==='corriere') renderCorriere();
+  if(name==='inserisci'){ if(!puoInserire()){ showView('oggi'); return; } renderInserisci(); }
 }
 
 // ══════════════════════════════════════════════════════════
